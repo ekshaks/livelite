@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <title>Audio/Video Stream Client</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <link rel="stylesheet" href="https://unpkg.com/@picocss/pico@1.*/css/pico.min.css">
+  <style>
+    .container {
+      max-width: 1000px;
+      margin: 0 auto;
+      padding: 1rem;
+    }
+    .status {
+      margin: 1.5rem 0;
+      padding: 1rem;
+      border-radius: 4px;
+    }
+    .status.active {
+      background-color: var(--card-background-color);
+      border-left: 4px solid var(--primary);
+    }
+    #stopBtn {
+      --background-color: var(--del-color);
+      --hover-background-color: var(--del-hover);
+    }
+    .video-container {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 1rem;
+      margin: 1rem 0;
+    }
+    .video-box {
+      background: var(--card-background-color);
+      border-radius: 8px;
+      padding: 0.5rem;
+      text-align: center;
+    }
+    video {
+      width: 100%;
+      max-height: 300px;
+      background: #000;
+      border-radius: 4px;
+    }
+    .controls {
+      display: flex;
+      gap: 1rem;
+      justify-content: center;
+      margin: 1rem 0;
+    }
+    .control-btn {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      border-radius: 4px;
+      cursor: pointer;
+      /*background: var(--card-background-color);*/
+      border: 1px solid var(--card-border-color);
+      color: var(--color); /* Ensure text color is visible */
+    }
+    .control-btn.active {
+      background: var(--primary);
+      color: white; /* Force white text in active state */
+    }
+    .transcription-box {
+      grid-column: 1 / -1;
+      background: var(--card-background-color);
+      border-radius: 8px;
+      padding: 1rem;
+      margin-top: 1rem;
+    }
+    .transcription-text {
+      min-height: 100px;
+      max-height: 200px;
+      overflow-y: auto;
+      padding: 0.5rem;
+      background: rgba(0, 0, 0, 0.1);
+      border-radius: 4px;
+      white-space: pre-wrap;
+    }
+    @media (max-width: 768px) {
+      .video-container {
+        grid-template-columns: 1fr;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="container">
+    <article>
+      <header>
+        <h1>Audio/Video Streaming Client</h1>
+      </header>
+      
+      <div class="video-container">
+        <div class="video-box">
+          <h3>Local Preview</h3>
+          <video id="localVideo" autoplay playsinline muted></video>
+          <div class="controls">
+            <button id="muteAudioBtn" class="control-btn" title="Mute Audio">
+              <span></span>
+              <span>Mute</span>
+            </button>
+            <button id="stopVideoBtn" class="control-btn" title="Stop Video">
+              <span></span>
+              <span>Stop</span>
+            </button>
+          </div>
+        </div>
+        <div class="video-box">
+          <h3>Remote Stream</h3>
+          <video id="remoteVideo" autoplay playsinline></video>
+        </div>
+        <div class="transcription-box">
+          <h3>Conversation</h3>
+          <div id="transcriptionText" class="transcription-text"></div>
+        </div>
+      </div>
+      
+      <div class="grid">
+        <button id="startBtn" class="contrast">Start Streaming</button>
+        <button id="stopBtn" class="secondary" style="display: none;">Stop Streaming</button>
+      </div>
+      
+      <div id="status" class="status">
+        Status: <span id="statusText">Ready</span>
+      </div>
+    </article>
+  </main>
+
+  <script>
+      async function logAudioLevels(pc) {
+        // pc = your RTCPeerConnection instance
+
+        setInterval(async () => {
+          const stats = await pc.getStats();
+
+          stats.forEach(report => {
+            // For remote audio tracks (incoming audio from the other peer)
+            if (report.type === "inbound-rtp" && report.kind === "audio") {
+              //console.log("📥 Inbound audio stats:", report);
+              if (report.audioLevel !== undefined) {
+                console.log("Inbound Remote audio level:", report.audioLevel);
+              }
+            }
+
+            // For local audio tracks (microphone you send out)
+            if (report.type === "outbound-rtp" && report.kind === "audio") {
+              //console.log("📤 Outbound audio stats:", report);
+            }
+
+            // Some browsers (Chrome/Edge) provide audio level via track stats
+            if (report.type === "track" && report.kind === "audio") {
+              if (report.audioLevel !== undefined) {
+                console.log(`🎤 Track Audio level for ${report.trackIdentifier}:`, report.audioLevel);
+              }
+            }
+          });
+        }, 500); // every 500 ms
+      }
+
+
+  </script>
+
+  <script>
+    let stream = null;
+    let pc = null;
+    let audioTracks = [];
+    let videoTracks = [];
+    let dataChannel;
+    let transcriptionElement = document.getElementById('transcriptionText');
+    const startBtn = document.getElementById('startBtn'); // start streaming
+    const stopBtn = document.getElementById('stopBtn'); // stop streaming
+
+    const muteAudioBtn = document.getElementById('muteAudioBtn'); // mute audio
+    const stopVideoBtn = document.getElementById('stopVideoBtn'); // stop video
+    
+    const statusDiv = document.getElementById('status'); // status
+    const statusText = document.getElementById('statusText'); // status text
+    
+    const localVideo = document.getElementById('localVideo'); // local video
+    const remoteVideo = document.getElementById('remoteVideo'); // remote video
+
+    function updateStatus(message, isActive = false) {
+      statusText.textContent = message;
+      statusDiv.classList.toggle('active', isActive);
+      console.log('Status:', message);
+    }
+
+    // Toggle audio mute
+    muteAudioBtn.addEventListener('click', () => {
+      const isMuted = audioTracks[0]?.enabled === false;
+      audioTracks.forEach(track => {
+        track.enabled = isMuted;
+      });
+      const icon = muteAudioBtn.querySelector('span:first-child');
+      const text = muteAudioBtn.querySelector('span:last-child');
+      if (isMuted) {
+        //icon.textContent = '🔇';
+        text.textContent = 'Mute';
+        muteAudioBtn.classList.remove('active');
+      } else {
+        //icon.textContent = '🔊';
+        text.textContent = 'Unmute';
+        muteAudioBtn.classList.add('active');
+      }
+    });
+
+    // Toggle video on/off
+    stopVideoBtn.addEventListener('click', () => {
+      const isStopped = videoTracks.length > 0 && !videoTracks[0].enabled;
+      
+      // Toggle video track
+      videoTracks.forEach(track => {
+        track.enabled = isStopped;
+      });
+      
+      // Toggle local video preview
+      if (isStopped) {
+        // If turning on, set the stream to the video element
+        localVideo.srcObject = stream;
+        localVideo.play().catch(e => console.error("Error playing video:", e));
+      } else {
+        // If turning off, clear the video element
+        localVideo.srcObject = null;
+      }
+      
+      updateTrackReferences(); // Update UI state
+    });
+
+    // Update track references when stream changes
+    function updateTrackReferences() {
+      if (!stream) return;
+      audioTracks = stream.getAudioTracks();
+      videoTracks = stream.getVideoTracks();
+      
+      // Update mute button state
+      const isMuted = audioTracks.length > 0 && !audioTracks[0].enabled;
+      const muteIcon = muteAudioBtn.querySelector('span:first-child');
+      const muteText = muteAudioBtn.querySelector('span:last-child');
+      //muteIcon.textContent = isMuted ? '🔇' : '🔊';
+      muteText.textContent = isMuted ? 'Unmute' : 'Mute';
+      muteAudioBtn.classList.toggle('active', isMuted);
+      
+      // Update video button state
+      const isVideoStopped = videoTracks.length > 0 && !videoTracks[0].enabled;
+      const videoIcon = stopVideoBtn.querySelector('span:first-child');
+      const videoText = stopVideoBtn.querySelector('span:last-child');
+      //videoIcon.textContent = isVideoStopped ? '❌' : '🎥';
+      videoText.textContent = isVideoStopped ? 'Start' : 'Stop';
+      stopVideoBtn.classList.toggle('active', isVideoStopped);
+    }
+
+    async function startStreaming() {
+      try {
+        updateStatus('Requesting media access...', true);
+        
+        // Get user media but don't play it automatically
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: true,
+          video: true
+        });
+        
+        // Update track references but don't set srcObject for localVideo
+        updateTrackReferences();
+        
+        // Create peer connection with ICE servers (optional but recommended)
+        const configuration = {
+          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
+        };
+        pc = new RTCPeerConnection(configuration);
+        //pc = new RTCPeerConnection();
+        
+        // Add all tracks to the connection
+        stream.getTracks().forEach(track => {
+          pc.addTrack(track, stream);
+          console.log(`Added ${track.kind} track`);
+        });
+
+        dataChannel = pc.createDataChannel("server_text");
+        dataChannel.onopen = () => {
+          console.log("✅ Data channel open");
+          dataChannel.send("👋 Hello from client!");
+        };
+
+        dataChannel.onmessage = (event) => {
+          console.log("📨 Message from server:", event.data);
+          // Update transcription display
+          if (event.data.trim()) {
+            const data = JSON.parse(event.data);
+            transcriptionElement.textContent += data.role + ": " + data.content + '\n';
+            // Auto-scroll to bottom
+            transcriptionElement.scrollTop = transcriptionElement.scrollHeight;
+          }
+        };
+
+        dataChannel.onclose = () => {
+          console.log("❌ Data channel closed");
+        };
+
+        // Handle incoming tracks from remote
+        pc.ontrack = (event) => {
+          console.log('Received remote track:', event.track.kind);
+          if (remoteVideo.srcObject !== event.streams[0]) {
+            remoteVideo.srcObject = event.streams[0];
+          }
+        };
+
+        // Handle ICE connection state changes
+        pc.oniceconnectionstatechange = () => {
+          console.log('ICE Connection State:', pc.iceConnectionState);
+          if (pc.iceConnectionState === 'failed' || 
+              pc.iceConnectionState === 'disconnected' ||
+              pc.iceConnectionState === 'closed') {
+            updateStatus(`Connection ${pc.iceConnectionState}`);
+          }
+        };
+
+        updateStatus('Creating offer...', true);
+        const offer = await pc.createOffer({
+          offerToReceiveAudio: true,
+          offerToReceiveVideo: true
+        });
+        await pc.setLocalDescription(offer);
+
+        // Send offer to server
+        updateStatus('Connecting to server...', true);
+        const response = await fetch("http://localhost:9000/offer", {
+          method: "POST",
+          body: JSON.stringify({
+            sdp: pc.localDescription.sdp,
+            type: pc.localDescription.type
+          }),
+          headers: { "Content-Type": "application/json" }
+        });
+
+        if (!response.ok) {
+          throw new Error(`Server error: ${response.status}`);
+        }
+
+        const answer = await response.json();
+        await pc.setRemoteDescription(answer);
+        
+        // Update UI
+        startBtn.style.display = 'none';
+        stopBtn.style.display = 'block';
+        updateStatus('Streaming active', true);
+        
+        // Log Audio Levels
+        logAudioLevels(pc);
+        
+      } catch (error) {
+        console.error('Error:', error);
+        updateStatus(`Error: ${error.message}`);
+        stopStreaming();
+      }
+    }
+
+    function stopStreaming() {
+      if (stream) {
+        // Stop all tracks
+        stream.getTracks().forEach(track => {
+          track.stop();
+          console.log(`Stopped ${track.kind} track`);
+        });
+        stream = null;
+        audioTracks = [];
+        videoTracks = [];
+      }
+      
+      if (pc) {
+        pc.close();
+        pc = null;
+      }
+      
+      // Clear video elements
+      localVideo.srcObject = null;
+      remoteVideo.srcObject = null;
+      
+      // Update UI
+      startBtn.style.display = 'block';
+      stopBtn.style.display = 'none';
+      updateStatus('Streaming stopped');
+    }
+
+    // Event Listeners
+    startBtn.addEventListener('click', startStreaming);
+    stopBtn.addEventListener('click', stopStreaming);
+
+    // Initial status
+    updateStatus('Click Start to begin streaming');
+  </script>
+</body>
+</html>

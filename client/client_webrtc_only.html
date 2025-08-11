@@ -1,0 +1,39 @@
+<!-- client.html -->
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Mic Stream Client</title>
+</head>
+<body>
+  <h1>Streaming microphone to server...</h1>
+  <script>
+    async function start() {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const pc = new RTCPeerConnection();
+
+      // Add mic stream
+      for (const track of stream.getTracks()) {
+        pc.addTrack(track, stream);
+      }
+
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      // Send offer to server
+      const response = await fetch("http://localhost:8080/offer", {
+        method: "POST",
+        body: JSON.stringify({
+          sdp: pc.localDescription.sdp,
+          type: pc.localDescription.type
+        }),
+        headers: { "Content-Type": "application/json" }
+      });
+
+      const answer = await response.json();
+      await pc.setRemoteDescription(answer);
+    }
+
+    start();
+  </script>
+</body>
+</html>
