@@ -26,7 +26,6 @@ def create_agent():
     )
 
 
-from rx.subject import Subject
 
 async def create_pipeline(pc, data_channels, audio_input, video_input, main_loop):
     '''
@@ -56,7 +55,7 @@ if __name__ == "__main__":
     from server.server_asyncio import Server
     
     # Create and run the server
-    server = Server(create_pipeline=create_pipeline)
+    server = Server(create_pipeline=create_pipeline, debug=False)
     server.run()
 
 

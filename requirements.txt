@@ -1,6 +1,7 @@
-rxpy
 pydub
 pyaudio
-asyncio
-agno
 librosa
+asyncio
+reactivex
+agno
+faster-whisper
