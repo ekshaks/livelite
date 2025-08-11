@@ -1,0 +1,6 @@
+rxpy
+pydub
+pyaudio
+asyncio
+agno
+librosa
