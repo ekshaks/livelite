@@ -22,7 +22,7 @@ def estimate_pitch(y, sr):
 
 
 
-def is_active_speaker(chunk, sr, rms_thresh=0.05, centroid_thresh=2000, pitch_threshold=165):
+def is_active_speaker(chunk, sr, rms_thresh=0.05, centroid_thresh=2000, pitch_threshold=165, debug=False):
     """
     Quick heuristic for near vs far:
     - RMS loudness must be above rms_thresh
@@ -44,7 +44,7 @@ def is_active_speaker(chunk, sr, rms_thresh=0.05, centroid_thresh=2000, pitch_th
 
     # Decision
 
-    if active:
+    if active and debug:
         print(f"RMS: {rms}, Centroid: {centroid}, Rolloff: {rolloff}, ZCR: {zcr}, Gender: {gender}, F0: {f0}")
     return active
 

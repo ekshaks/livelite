@@ -8,12 +8,12 @@ from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
 from aiortc import MediaStreamError
 from .audio_utils import convert_and_resample_frame
 from .audio_utils import is_active_speaker
-import rx # for input audio/video subjects
+from .utils import rx_Subject as Subject # for input audio/video subjects
 
 DEFAULT_CLIENT_HTML_PATH = Path(__file__).parent.parent / "client/client.html"
 
 class Server:
-    def __init__(self, create_pipeline: Callable, client_html_path: Path = DEFAULT_CLIENT_HTML_PATH):
+    def __init__(self, create_pipeline: Callable, client_html_path: Path = DEFAULT_CLIENT_HTML_PATH, debug: bool = False):
         """Initialize the WebRTC server with a pipeline creation function.
         
         Args:
@@ -29,6 +29,7 @@ class Server:
         self.input_video_sample_interval = 500
         self.input_audio_buffer_size = 8000
         self.rms_thresh = 0.02
+        self.debug = debug
     
     def _setup_routes(self, client_html_path):
         """Set up the web application routes."""
@@ -53,7 +54,7 @@ class Server:
                 # Process complete chunks
                 while len(buffer) >= bsize:
                     chunk_out = buffer[:bsize]
-                    active = is_active_speaker(chunk_out, sr, rms_thresh=rms_thresh)
+                    active = is_active_speaker(chunk_out, sr, rms_thresh=rms_thresh, debug=self.debug)
                     if active:
                         speech_turn_input.on_next(chunk_out)
                     buffer = buffer[bsize:]
@@ -120,7 +121,7 @@ class Server:
         pc.on("datachannel", on_datachannel)
         
         main_loop = asyncio.get_running_loop()
-        audio_input, video_input = rx.subject.Subject(), rx.subject.Subject()
+        audio_input, video_input = Subject(), Subject()
         asyncio.create_task(self.create_pipeline(pc, data_channels, audio_input, video_input, main_loop))
         
         def on_track(track: MediaStreamTrack):

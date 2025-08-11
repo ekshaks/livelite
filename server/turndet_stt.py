@@ -1,9 +1,7 @@
 import numpy as np
 import json
 
-import rx
-from rx import operators as ops
-from rx.subject import Subject
+from .utils import rx_ops as ops, rx_Subject as Subject, rx_Observable, rx_interval
 from faster_whisper import WhisperModel
 import time
 import torch
@@ -38,7 +36,7 @@ def get_vad_model() -> Tuple[Any, Any]:
 def turn_detector_vad(silence_timeout: float = 1.0, poll_interval: float = 0.1, 
     min_speech_duration_ms: int = 100, min_silence_duration_ms: int = 2000,
     speech_pad_ms: int = 200, threshold: float = 0.4, RATE: int = 16000
-) -> Tuple[Subject, rx.Observable]:
+) -> Tuple[Subject, rx_Observable]:
     """Voice Activity Detection using Silero VAD with singleton model loading."""
 
     vad_model, utils = get_vad_model()
@@ -90,7 +88,7 @@ def turn_detector_vad(silence_timeout: float = 1.0, poll_interval: float = 0.1,
         on_error=lambda e: print(f"VAD processing error: {e}")
     )
     
-    rx.interval(poll_interval).subscribe(check_silence)
+    rx_interval(poll_interval).subscribe(check_silence)
     
     return input_subject, output_subject
 

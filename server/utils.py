@@ -1,5 +1,9 @@
 import asyncio
-from rx.scheduler.eventloop import AsyncIOScheduler
+import reactivex as rx
+from reactivex.subject import Subject as rx_Subject
+from reactivex import Observable as rx_Observable, interval as rx_interval
+from reactivex import operators as rx_ops
+from reactivex.scheduler.eventloop import AsyncIOScheduler
 
 def rx_to_async_iter(rx_observable, debug=False):
     """Convert RxPY Observable to AsyncIterable of ProcessorPart."""
