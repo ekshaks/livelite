@@ -13,7 +13,7 @@ from .utils import rx_Subject as Subject # for input audio/video subjects
 DEFAULT_CLIENT_HTML_PATH = Path(__file__).parent.parent / "client/client.html"
 
 class Server:
-    def __init__(self, create_pipeline: Callable, client_html_path: Path = DEFAULT_CLIENT_HTML_PATH, debug: bool = False):
+    def __init__(self, create_pipeline: Callable, client_html_path: Path = DEFAULT_CLIENT_HTML_PATH, config: Dict = {}):
         """Initialize the WebRTC server with a pipeline creation function.
         
         Args:
@@ -26,10 +26,11 @@ class Server:
         self._setup_routes(client_html_path)
         self.app.on_shutdown.append(self.on_shutdown)
 
-        self.input_video_sample_interval = 500
-        self.input_audio_buffer_size = 8000
-        self.rms_thresh = 0.02
-        self.debug = debug
+        self.config = config
+        self.rms_thresh = config.get("rms_thresh", 0.02)
+        self.debug = config.get("debug", False)
+        self.input_audio_buffer_size = config.get("input_audio_buffer_size", 8000)
+        self.input_video_sample_interval = config.get("input_video_sample_interval", 500)
     
     def _setup_routes(self, client_html_path):
         """Set up the web application routes."""
