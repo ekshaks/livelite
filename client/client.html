@@ -5,10 +5,21 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <link rel="stylesheet" href="https://unpkg.com/@picocss/pico@1.*/css/pico.min.css">
   <style>
+    body {
+      margin: 0;
+      padding: 0;
+    }
+    body {
+      margin: 0;
+      padding: 0;
+      background: #f5f5f5;
+    }
     .container {
-      max-width: 1000px;
+      max-width: 1400px;
       margin: 0 auto;
-      padding: 1rem;
+      padding: 1.5rem;
+      min-height: 100vh;
+      box-sizing: border-box;
     }
     .status {
       margin: 1.5rem 0;
@@ -23,11 +34,19 @@
       --background-color: var(--del-color);
       --hover-background-color: var(--del-hover);
     }
-    .video-container {
+    .main-container {
       display: grid;
-      grid-template-columns: 1fr 1fr;
+      grid-template-columns: 2fr 1fr;
+      gap: 1.5rem;
+      margin: 1.5rem 0;
+      align-items: start;
+      min-height: calc(100vh - 120px);
+    }
+    
+    .video-container {
+      display: flex;
+      flex-direction: column;
       gap: 1rem;
-      margin: 1rem 0;
     }
     .video-box {
       background: var(--card-background-color);
@@ -62,71 +81,131 @@
       background: var(--primary);
       color: white; /* Force white text in active state */
     }
+    .conversation-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 1rem;
+      width: 100%;
+    }
+    
+    .conversation-header h3 {
+      margin: 0;
+      white-space: nowrap;
+      margin-right: 1rem;
+    }
+    
+    .button-group {
+      display: flex;
+      gap: 0.5rem;
+    }
+    
+    .small-btn {
+      padding: 0.15rem 0.55rem;
+      font-size: 0.875rem;
+      height: auto;
+      line-height: 1.25;
+      white-space: nowrap;
+      min-width: auto;
+      width: auto;
+      text-align: center;
+      flex-shrink: 0;
+    }
+    
     .transcription-box {
-      grid-column: 1 / -1;
       background: var(--card-background-color);
       border-radius: 8px;
       padding: 1rem;
-      margin-top: 1rem;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
     }
     .transcription-text {
-      min-height: 100px;
-      max-height: 200px;
+      flex: 1;
       overflow-y: auto;
       padding: 0.5rem;
       background: rgba(0, 0, 0, 0.1);
       border-radius: 4px;
       white-space: pre-wrap;
+      min-height: 0;
+      max-height: 60vh;
+    @media (max-width: 1200px) {
+      .container {
+        padding: 1rem;
+      }
+      .main-container {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+      }
+      .video-container {
+        flex-direction: row;
+        flex-wrap: wrap;
+        gap: 1rem;
+      }
+      .video-box {
+        flex: 1;
+        min-width: 300px;
+      }
     }
+    
     @media (max-width: 768px) {
       .video-container {
-        grid-template-columns: 1fr;
+        flex-direction: column;
+      }
+      .video-box {
+        width: 100%;
+        min-width: 100%;
       }
     }
   </style>
 </head>
 <body>
-  <main class="container">
-    <article>
-      <header>
-        <h1>Audio/Video Streaming Client</h1>
-      </header>
+  <div class="container">
+    <h1>LiveLite</h1>
       
-      <div class="video-container">
-        <div class="video-box">
-          <h3>Local Preview</h3>
-          <video id="localVideo" autoplay playsinline muted></video>
-          <div class="controls">
-            <button id="muteAudioBtn" class="control-btn" title="Mute Audio">
-              <span></span>
-              <span>Mute</span>
-            </button>
-            <button id="stopVideoBtn" class="control-btn" title="Stop Video">
-              <span></span>
-              <span>Stop</span>
-            </button>
+      <div class="main-container">
+        <!-- Left column for conversation -->
+        <div class="conversation-column">
+          <div class="transcription-box">
+            <div class="conversation-header">
+              <h3>Conversation</h3>
+              <div class="button-group">
+                <button id="startBtn" class="small-btn">Start Streaming</button>
+                <button id="stopBtn" class="small-btn secondary" style="display: none;">Stop Streaming</button>
+              </div>
+            </div>
+            <div id="transcriptionText" class="transcription-text"></div>
           </div>
         </div>
-        <div class="video-box">
-          <h3>Remote Stream</h3>
-          <video id="remoteVideo" autoplay playsinline></video>
-        </div>
-        <div class="transcription-box">
-          <h3>Conversation</h3>
-          <div id="transcriptionText" class="transcription-text"></div>
+        
+        <!-- Right column for video previews -->
+        <div class="videos-column">
+          <div class="video-container">
+            <div class="video-box">
+              <h3>Local Preview</h3>
+              <video id="localVideo" autoplay playsinline muted></video>
+              <div class="controls">
+                <button id="muteAudioBtn" class="control-btn" title="Mute Audio">
+                  <span>Mute</span>
+                </button>
+                <button id="stopVideoBtn" class="control-btn" title="Stop Video">
+                  <span>Stop</span>
+                </button>
+              </div>
+            </div>
+            
+            <div class="video-box">
+              <h3>Remote Video</h3>
+              <video id="remoteVideo" autoplay playsinline></video>
+            </div>
+          </div>
         </div>
       </div>
       
-      <div class="grid">
-        <button id="startBtn" class="contrast">Start Streaming</button>
-        <button id="stopBtn" class="secondary" style="display: none;">Stop Streaming</button>
-      </div>
-      
-      <div id="status" class="status">
+      <div class="status">
         Status: <span id="statusText">Ready</span>
       </div>
-    </article>
-  </main>
+  </div>
 
   <script>
       async function logAudioLevels(pc) {
@@ -175,15 +254,19 @@
     const muteAudioBtn = document.getElementById('muteAudioBtn'); // mute audio
     const stopVideoBtn = document.getElementById('stopVideoBtn'); // stop video
     
-    const statusDiv = document.getElementById('status'); // status
+    const statusElement = document.querySelector('.status'); // status container
     const statusText = document.getElementById('statusText'); // status text
     
     const localVideo = document.getElementById('localVideo'); // local video
     const remoteVideo = document.getElementById('remoteVideo'); // remote video
 
     function updateStatus(message, isActive = false) {
-      statusText.textContent = message;
-      statusDiv.classList.toggle('active', isActive);
+      if (statusText) {
+        statusText.textContent = message;
+      }
+      if (statusElement) {
+        statusElement.classList.toggle('active', isActive);
+      }
       console.log('Status:', message);
     }
 
@@ -284,11 +367,12 @@
         };
 
         dataChannel.onmessage = (event) => {
-          console.log("📨 Message from server:", event.data);
+          console.log("Message from server:", event.data);
           // Update transcription display
           if (event.data.trim()) {
             const data = JSON.parse(event.data);
-            transcriptionElement.textContent += data.role + ": " + data.content + '\n';
+            text = `${data.role.toUpperCase()}: ${data.content}\n`;
+            transcriptionElement.textContent += text;
             // Auto-scroll to bottom
             transcriptionElement.scrollTop = transcriptionElement.scrollHeight;
           }
@@ -342,8 +426,14 @@
         await pc.setRemoteDescription(answer);
         
         // Update UI
-        startBtn.style.display = 'none';
-        stopBtn.style.display = 'block';
+        if (startBtn) {
+          startBtn.style.display = 'none';
+          startBtn.disabled = true;
+        }
+        if (stopBtn) {
+          stopBtn.style.display = 'block';
+          stopBtn.disabled = false;
+        }
         updateStatus('Streaming active', true);
         
         // Log Audio Levels
@@ -378,8 +468,14 @@
       remoteVideo.srcObject = null;
       
       // Update UI
-      startBtn.style.display = 'block';
-      stopBtn.style.display = 'none';
+      if (startBtn) {
+        startBtn.style.display = 'block';
+        startBtn.disabled = false;
+      }
+      if (stopBtn) {
+        stopBtn.style.display = 'none';
+        stopBtn.disabled = true;
+      }
       updateStatus('Streaming stopped');
     }
 

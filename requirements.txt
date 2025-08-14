@@ -5,3 +5,4 @@ asyncio
 reactivex
 agno
 faster-whisper
+google-generativeai
