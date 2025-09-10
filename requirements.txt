@@ -1,8 +1,11 @@
 pydub
 pyaudio
-librosa
 asyncio
 reactivex
 agno
+torch
 faster-whisper
-google-generativeai
+google-genai
+librosa
+kokoro-onnx
+sounddevice

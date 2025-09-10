@@ -55,7 +55,8 @@ class Server:
                 # Process complete chunks
                 while len(buffer) >= bsize:
                     chunk_out = buffer[:bsize]
-                    active = is_active_speaker(chunk_out, sr, rms_thresh=rms_thresh, debug=self.debug)
+                    active = is_active_speaker(chunk_out, sr, rms_thresh=rms_thresh, debug=self.debug, 
+                                filter_gender=self.config.get("filter_gender", None))
                     if active:
                         speech_turn_input.on_next(chunk_out)
                     buffer = buffer[bsize:]
@@ -65,7 +66,10 @@ class Server:
                 stop_event.set()
                 break
             except Exception as e:
+                import traceback
                 print(f"Error processing audio: {e}")
+                print(f"StackTrace: {traceback.format_exc()}")
+
                 stop_event.set()
                 break
         
@@ -171,7 +175,7 @@ class Server:
         self.pcs.clear()
     
     def run(self, host="localhost", port=9000):
-        """Run the web server."""
         web.run_app(self.app, host=host, port=port)
+
 
 

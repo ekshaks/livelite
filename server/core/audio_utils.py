@@ -2,7 +2,7 @@ import numpy as np
 import av
 from pydub import AudioSegment
 from io import BytesIO
-import librosa
+
 
 
 
@@ -22,7 +22,8 @@ def estimate_pitch(y, sr):
 
 
 
-def is_active_speaker(chunk, sr, rms_thresh=0.05, centroid_thresh=2000, pitch_threshold=165, debug=False):
+def is_active_speaker(chunk, sr, rms_thresh=0.05, centroid_thresh=2000, pitch_threshold=165, debug=True, filter_gender=None):
+    import librosa
     """
     Quick heuristic for near vs far:
     - RMS loudness must be above rms_thresh
@@ -38,9 +39,10 @@ def is_active_speaker(chunk, sr, rms_thresh=0.05, centroid_thresh=2000, pitch_th
 
     pitches = librosa.yin(y, fmin=50, fmax=300, sr=sr)
     f0 = np.nanmean(pitches)
+
     gender = "male" if f0 < pitch_threshold else "female"
 
-    active = (rms > rms_thresh) #and (centroid > centroid_thresh)
+    active = (rms > rms_thresh) and (gender == filter_gender if filter_gender else True)
 
     # Decision
 
