@@ -15,7 +15,7 @@ _WHISPER_MODEL = None
 _VAD_MODEL = None
 _VAD_UTILS = None
 
-def get_whisper_model(model_name: str = "tiny", compute_type: str = "int8") -> WhisperModel:
+def get_whisper_model(model_name: str = "base", compute_type: str = "int8") -> WhisperModel:
     """Get or create a singleton instance of Whisper model."""
     global _WHISPER_MODEL
     if _WHISPER_MODEL is None:

@@ -35,12 +35,23 @@
       --hover-background-color: var(--del-hover);
     }
     .main-container {
-      display: grid;
-      grid-template-columns: 2fr 1fr;
+      display: flex;
+      flex-direction: row;
       gap: 1.5rem;
       margin: 1.5rem 0;
-      align-items: start;
+      align-items: flex-start;
       min-height: calc(100vh - 120px);
+      width: 100%;
+    }
+    
+    .conversation-column {
+      flex: 2;
+      min-width: 0; /* Prevents flex item from overflowing */
+    }
+    
+    .videos-column {
+      flex: 1;
+      min-width: 0; /* Prevents flex item from overflowing */
     }
     
     .video-container {
@@ -56,7 +67,8 @@
     }
     video {
       width: 100%;
-      max-height: 300px;
+      min-height: 300px;
+      /* max-height: 500px; */
       background: #000;
       border-radius: 4px;
     }
@@ -127,15 +139,22 @@
       background: rgba(0, 0, 0, 0.1);
       border-radius: 4px;
       white-space: pre-wrap;
-      min-height: 0;
+      min-height: 200px;
       max-height: 60vh;
+    }
+    
     @media (max-width: 1200px) {
       .container {
         padding: 1rem;
       }
       .main-container {
-        grid-template-columns: 1fr;
-        gap: 1rem;
+        flex-direction: column;
+        gap: 1.5rem;
+      }
+      .conversation-column,
+      .videos-column {
+        width: 100%;
+        flex: none;
       }
       .video-container {
         flex-direction: row;
@@ -143,8 +162,8 @@
         gap: 1rem;
       }
       .video-box {
-        flex: 1;
-        min-width: 300px;
+        flex: 1 1 300px;
+        min-width: 0;
       }
     }
     
@@ -153,8 +172,18 @@
         flex-direction: column;
       }
       .video-box {
+        flex: 1 1 auto;
         width: 100%;
-        min-width: 100%;
+        max-width: 100%;
+      }
+      video {
+        max-height: 500px;
+        min-height: 400px;
+        width: 100%;
+      }
+      .transcription-text {
+        min-height: 200px;
+        max-height: 50vh;
       }
     }
   </style>
@@ -170,8 +199,8 @@
             <div class="conversation-header">
               <h3>Conversation</h3>
               <div class="button-group">
-                <button id="startBtn" class="small-btn">Start Streaming</button>
-                <button id="stopBtn" class="small-btn secondary" style="display: none;">Stop Streaming</button>
+                <button id="startBtn" class="small-btn">Start</button>
+                <button id="stopBtn" class="small-btn secondary" style="display: none;">Stop</button>
               </div>
             </div>
             <div id="transcriptionText" class="transcription-text"></div>
@@ -182,20 +211,20 @@
         <div class="videos-column">
           <div class="video-container">
             <div class="video-box">
-              <h3>Local Preview</h3>
+              <h5>Video Stream (Local)</h5>
               <video id="localVideo" autoplay playsinline muted></video>
               <div class="controls">
-                <button id="muteAudioBtn" class="control-btn" title="Mute Audio">
+                <button id="muteAudioBtn" class="control-btn small-btn" title="Mute Audio">
                   <span>Mute</span>
                 </button>
-                <button id="stopVideoBtn" class="control-btn" title="Stop Video">
+                <button id="stopVideoBtn" class="control-btn small-btn" title="Stop Video">
                   <span>Stop</span>
                 </button>
               </div>
             </div>
             
             <div class="video-box">
-              <h3>Remote Video</h3>
+              <h5>Video Stream (Remote)</h5>
               <video id="remoteVideo" autoplay playsinline></video>
             </div>
           </div>

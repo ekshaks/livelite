@@ -4,6 +4,8 @@ from server.utils import rx_to_async_iter, send_text_to_client
 from server.turndet_stt import run_stt
 import yaml
 from pathlib import Path
+from server.llm_utils import call_vlm_agent
+from server.tts import gemini_tts_play, tts_and_play_kokoro
 
 '''
 A Math solving Agent pipeline:
@@ -18,11 +20,11 @@ A Math solving Agent pipeline:
 
 PROMPTS_FILE = Path(__file__).parent / "prompts.yml"
 
-def create_agent():
+def create_agent(id='math_helper'):
     with open(PROMPTS_FILE) as f:
         prompts = yaml.safe_load(f)
-        instructions = prompts['math_helper']['instructions']
-        description = prompts['math_helper']['description']
+        instructions = prompts[id]['instructions']
+        description = prompts[id]['description']
 
     return Agent(
         name = "Math Helper",
@@ -38,31 +40,7 @@ def create_agent():
 # Sofia bought 3 notebooks for $2.50 each and 2 pens for $1.20 each.
 # How much did she spend in total?
 
-async def vlm_agent(text, last_frame):
-    from PIL import Image
-    import google.generativeai as genai
-
-    with open(PROMPTS_FILE) as f:
-        system_prompt = yaml.safe_load(f)['vlm_math']
-
-    model = genai.GenerativeModel('gemini-2.0-flash')
-
-    # Create the parts of the prompt
-    prompt_parts = [
-        system_prompt,
-        text,
-    ]
-    if last_frame is not None:
-        pil_image = Image.fromarray(last_frame.to_ndarray(format='rgb24'))
-        prompt_parts.append(pil_image)
-    print('call vlm agent', prompt_parts)
-    
-    # Send the request to the API
-    response = model.generate_content(prompt_parts)
-    print(response.text)
-    return response
-
-async def create_pipeline(pc, data_channels, audio_input, video_input, main_loop, mode='visual'):
+async def create_pipeline(pc, data_channels, audio_input, video_input, main_loop, mode='a'):
     '''
     Create a pipeline that takes in audio and video frames.
     Input audio -> vad-stt -> user:text -> send_to_client
@@ -83,7 +61,9 @@ async def create_pipeline(pc, data_channels, audio_input, video_input, main_loop
 
     video_input.subscribe(update_last)  # keeps latest frame
 
-    agent = create_agent()
+    agent = create_agent(id='visual_solver')
+
+    
     async for text in text_gen:
         print(f"User: {text}")
         send_text_to_client(text, data_channels, main_loop, channel="server_text", role="user")
@@ -92,16 +72,17 @@ async def create_pipeline(pc, data_channels, audio_input, video_input, main_loop
         if not text.strip():
             continue
         
-        if mode == 'visual':
-            response = await vlm_agent(text, last_frame)
-            ass_text = response.text
+        if mode == 'av':
+            response = await call_vlm_agent(agent, text, last_frame)
+            ass_text = response.content
         else:
             response = await agent.arun(text)
             ass_text = response.content
+
         if ass_text.strip():
             print(f"Assistant: {ass_text}")
             send_text_to_client(ass_text, data_channels, main_loop, channel="server_text", role="assistant")
-
+            await tts_and_play_kokoro(ass_text)
 
 
 def test_vlm_call():
@@ -110,19 +91,22 @@ def test_vlm_call():
     arr = np.zeros((100, 100, 3), dtype=np.uint8)
     #text = "what do you see in this image?"
     text = "Sofia bought 3 notebooks for $2.50 each and 2 pens for $1.20 each. How much did she spend in total?"
-    asyncio.run(vlm_agent(text, arr))
+    asyncio.run(vlm_agent2(text, arr))
 
 if __name__ == "__main__":
     from server.server_asyncio import Server
     
     #test_vlm_call()
+    #quit()
     # Create and run the server
     config = dict(
-        debug=False,
-        rms_thresh=0.02,
+        debug=True,
+        rms_thresh=0.05, #0.02,
         input_video_sample_interval=100,
+        filter_gender=None #'male'
     )
-    server = Server(create_pipeline=create_pipeline, config=config)
+    server = Server(create_pipeline=lambda *args: create_pipeline(*args, mode='av'),
+                    config=config)
     server.run()
 
 
