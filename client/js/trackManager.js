@@ -11,8 +11,13 @@ export const TrackManager = {
   videoTrack: null,
   audioTrack: null,
 
-  async initConnection() {
+  onDataMessage: null, // callback
+
+// Inside initConnection
+
+  async initConnection(onDataMessage=null) {
     this.pc = new RTCPeerConnection();
+    this.onDataMessage = onDataMessage;
 
     // reserve lanes for audio + video in SDP
     this.audioTransceiver = this.pc.addTransceiver("audio");
@@ -22,6 +27,7 @@ export const TrackManager = {
     this.dataChannel = this.pc.createDataChannel("server_text");
     this.dataChannel.onmessage = (e) => {
       console.log("Server:", e.data);
+      if (this.onDataMessage) this.onDataMessage(e.data);
     };
 
     // handle ICE candidates (optional if using trickle ICE later)
