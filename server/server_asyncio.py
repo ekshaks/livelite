@@ -6,9 +6,9 @@ from pathlib import Path
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
 from aiortc import MediaStreamError
-from .core.audio_utils import convert_and_resample_frame
-from .core.audio_utils import is_active_speaker
+
 from .core.utils import rx_Subject as Subject # for input audio/video subjects
+from .setup_tracks import pc_pipeline_setup
 
 DEFAULT_CLIENT_HTML_PATH = Path(__file__).parent.parent / "client/client.html"
 
@@ -27,10 +27,7 @@ class Server:
         self.app.on_shutdown.append(self.on_shutdown)
 
         self.config = config
-        self.rms_thresh = config.get("rms_thresh", 0.02)
-        self.debug = config.get("debug", False)
-        self.input_audio_buffer_size = config.get("input_audio_buffer_size", 8000)
-        self.input_video_sample_interval = config.get("input_video_sample_interval", 500)
+
     
     def _setup_routes(self, client_html_path):
         """Set up the web application routes."""
@@ -54,116 +51,13 @@ class Server:
         # catch-all route
         self.app.router.add_get("/{path:.*}", serve_client_file)
         
-    async def handle_audio_track(self, pc, track: MediaStreamTrack, speech_turn_input, stop_event, 
-                                audio_buffer_size, rms_thresh):
-        """Handle incoming audio track and process it through the pipeline."""
-
-        buffer = np.array([], dtype=np.int16)
-        bsize = audio_buffer_size #audio buffer size, for sending to pipeline
-        sr = 16000
-        
-        while not stop_event.is_set():
-            try:
-                frame = await track.recv()
-                chunk = convert_and_resample_frame(frame, target_sample_rate=sr)
-                buffer = np.concatenate([buffer, chunk])
-                
-                # Process complete chunks
-                while len(buffer) >= bsize:
-                    chunk_out = buffer[:bsize]
-                    active = is_active_speaker(chunk_out, sr, rms_thresh=rms_thresh, debug=self.debug, 
-                                filter_gender=self.config.get("filter_gender", None))
-                    if active:
-                        speech_turn_input.on_next(chunk_out)
-                    buffer = buffer[bsize:]
-                    
-            except MediaStreamError:
-                print("Audio track ended")
-                stop_event.set()
-                break
-            except Exception as e:
-                import traceback
-                print(f"Error processing audio: {e}")
-                print(f"StackTrace: {traceback.format_exc()}")
-
-                stop_event.set()
-                break
-        
-        # Process any remaining audio
-        if len(buffer) > 0 and not stop_event.is_set():
-            speech_turn_input.on_next(buffer)
-        
-        print("Audio processing stopped")
-
-    async def handle_video_track(self, pc, track: MediaStreamTrack, video_obs_input, stop_event, interval):
-        """Handle incoming video track. Sample at interval, send to observer"""
-        frame_count = 0
-        
-        while not stop_event.is_set():
-            try:
-                frame = await track.recv()
-                frame_count += 1
-                
-                # Log frame info occasionally
-                if frame_count % interval == 0:
-                    print('sending frame')
-                    video_obs_input.on_next(frame)
-                    
-            except MediaStreamError:
-                print("Video track ended")
-                stop_event.set()
-                break
-            except Exception as e:
-                print(f"Error processing video: {e}")
-                stop_event.set()
-                break
-        
-        print("Video processing stopped")
-
+   
     async def offer_handler(self, request):
         """Handle WebRTC offer and set up media processing pipeline."""
         params = await request.json()
-        pc = RTCPeerConnection()
+        pc = pc_pipeline_setup(self.create_pipeline, self.config)
         self.pcs.add(pc)
-        
-        stop_event = asyncio.Event()
-        data_channels = {}
-
-        def on_datachannel(channel):
-            print(f"Data channel received: {channel.label}")
-            data_channels[channel.label] = channel
-
-            @channel.on("message")
-            def on_message(message):
-                print("Message from client:", message)
-                response = json.dumps({"role": "assistant", "content": "Hello from Assistant!"})
-                data_channels[channel.label].send(response)
-        
-        pc.on("datachannel", on_datachannel)
-        
-        main_loop = asyncio.get_running_loop()
-        audio_input, video_input = Subject(), Subject()
-        asyncio.create_task(self.create_pipeline(pc, data_channels, audio_input, video_input, main_loop))
-        
-        def on_track(track: MediaStreamTrack):
-            print(f"Track received: {track.kind}")
-            if track.kind == "audio":
-                asyncio.create_task(
-                    self.handle_audio_track(pc, track, audio_input, stop_event, self.input_audio_buffer_size, self.rms_thresh)
-                )
-            elif track.kind == "video":
-                asyncio.create_task(self.handle_video_track(pc, track, video_input, stop_event, self.input_video_sample_interval))
-        
-        pc.on("track", on_track)
-        
-        async def on_connectionstatechange():
-            print(f"Connection state changed to: {pc.connectionState}")
-            if pc.connectionState in ["failed", "closed"]:
-                stop_event.set()
-                self.pcs.discard(pc)
-                await pc.close()
-        
-        pc.on("connectionstatechange", on_connectionstatechange)
+ 
         
         try:
             offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
