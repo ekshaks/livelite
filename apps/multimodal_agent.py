@@ -99,7 +99,7 @@ def test_vlm_call():
     asyncio.run(vlm_agent2(text, arr))
 
 if __name__ == "__main__":
-    from server.server_asyncio import Server
+    from server.server_fastapi_webrtc import Server
     
     #test_vlm_call()
     #quit()
@@ -110,6 +110,10 @@ if __name__ == "__main__":
         input_video_sample_interval=100,
         filter_gender=None #'male'
     )
+    # config.update({
+    #     "ssl_keyfile": "./server/ssl/key.pem",
+    #     "ssl_certfile": "./server/ssl/cert.pem"
+    # })
     server = Server(create_pipeline=lambda *args: create_pipeline(*args, mode='av'),
                     config=config)
     server.run()

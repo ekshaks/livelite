@@ -1,10 +1,7 @@
-import asyncio
-import json
-import numpy as np
 from typing import Callable, Dict, Set, Any, Awaitable
 from pathlib import Path
 from aiohttp import web
-from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
+from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc import MediaStreamError
 
 from .core.utils import rx_Subject as Subject # for input audio/video subjects

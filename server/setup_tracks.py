@@ -117,7 +117,7 @@ def pc_pipeline_setup(create_pipeline, config):
         print(f"Connection state changed to: {pc.connectionState}")
         if pc.connectionState in ["failed", "closed"]:
             stop_event.set()
-            self.pcs.discard(pc)
+            # pcs.discard(pc) #TODO: add
             await pc.close()
     
     pc.on("connectionstatechange", on_connectionstatechange)
