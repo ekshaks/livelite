@@ -4,7 +4,7 @@
 import { addMessage, getInputValue, clearInput } from "./ui.js";
 import { TextTransport } from "./text_transport.js";
 
-function initApp() {
+function initAppWS() {
   const form = document.getElementById("chat-form");
 
   // Create transport instance
@@ -35,4 +35,4 @@ function initApp() {
   console.log("[App] Initialized");
 }
 
-document.addEventListener("DOMContentLoaded", initApp);
+document.addEventListener("DOMContentLoaded", initAppWS);

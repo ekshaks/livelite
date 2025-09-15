@@ -6,9 +6,9 @@ from pathlib import Path
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
 from aiortc import MediaStreamError
-from .audio_utils import convert_and_resample_frame
-from .audio_utils import is_active_speaker
-from .utils import rx_Subject as Subject # for input audio/video subjects
+from .core.audio_utils import convert_and_resample_frame
+from .core.audio_utils import is_active_speaker
+from .core.utils import rx_Subject as Subject # for input audio/video subjects
 
 DEFAULT_CLIENT_HTML_PATH = Path(__file__).parent.parent / "client/client.html"
 
@@ -36,6 +36,25 @@ class Server:
         """Set up the web application routes."""
         print('setting up routes..')
         self.app.router.add_post("/offer", self.offer_handler)
+        
+        # Serve JavaScript files securely
+        js_dir = client_html_path.parent / "js"
+        async def serve_js(request):
+            # Get the requested path and resolve it to prevent directory traversal
+            requested_path = request.match_info['path']
+            try:
+                # Use pathlib to resolve the full path and ensure it's within the js directory
+                full_path = (js_dir / requested_path).resolve()
+                if not full_path.is_relative_to(js_dir):
+                    raise web.HTTPForbidden()
+                if not full_path.exists():
+                    raise web.HTTPNotFound()
+                return web.FileResponse(full_path)
+            except (ValueError, RuntimeError):
+                # Handle path resolution errors (e.g., path tries to escape the directory)
+                raise web.HTTPForbidden()
+        
+        self.app.router.add_get("/js/{path:.+}", serve_js)
         self.app.router.add_get("/", lambda request: web.FileResponse(client_html_path))
     
     async def handle_audio_track(self, pc, track: MediaStreamTrack, speech_turn_input, stop_event, 
@@ -90,7 +109,7 @@ class Server:
                 
                 # Log frame info occasionally
                 if frame_count % interval == 0:
-                    print(f"Received video frame {frame_count}: {frame.width}x{frame.height}")
+                    print('sending frame')
                     video_obs_input.on_next(frame)
                     
             except MediaStreamError:

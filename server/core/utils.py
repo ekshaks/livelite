@@ -32,7 +32,7 @@ def rx_to_async_iter(rx_observable, debug=False):
 
 def send_text_to_client(text, data_channels, loop, role="user", channel="server_text"):
     import json
-    #print(f"sending to client: {text}")
+    print(f"sending to client: {text}")
     try:
         channel = data_channels.get(channel)
         if channel and channel.readyState == "open":

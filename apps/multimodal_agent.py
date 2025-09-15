@@ -1,11 +1,13 @@
 from agno.agent import Agent
 from agno.models.google import Gemini
-from server.utils import rx_to_async_iter, send_text_to_client
-from server.turndet_stt import run_stt
+from server.core.utils import rx_to_async_iter, send_text_to_client
+from server.core.stt import run_stt
+
+from server.core.llm_utils import call_vlm_agent
+from server.core.tts import gemini_tts_play, tts_and_play_kokoro, tts_kokoro_sequence_async
+
 import yaml
 from pathlib import Path
-from server.llm_utils import call_vlm_agent
-from server.tts import gemini_tts_play, tts_and_play_kokoro
 
 '''
 A Math solving Agent pipeline:
@@ -48,7 +50,9 @@ async def create_pipeline(pc, data_channels, audio_input, video_input, main_loop
     todo: agent -> tts -> Output audio
     '''
 
-    text_output = run_stt(audio_input)
+    text_output, speech_signals = run_stt(audio_input)
+    speech_signals.subscribe(lambda event: print(f"**** Speech event: {event}"))
+
     #text_output.subscribe(lambda text: print(f"Transcription: {text}"))
     text_gen = rx_to_async_iter(text_output)
 
@@ -57,12 +61,12 @@ async def create_pipeline(pc, data_channels, audio_input, video_input, main_loop
     def update_last(x):
         nonlocal last_frame
         last_frame = x
-        print('updated last frame')
+        print(f"Received video frame : {x.width}x{x.height}, update last frame")
+        #print('updated last frame')
 
     video_input.subscribe(update_last)  # keeps latest frame
 
     agent = create_agent(id='visual_solver')
-
     
     async for text in text_gen:
         print(f"User: {text}")
@@ -82,7 +86,8 @@ async def create_pipeline(pc, data_channels, audio_input, video_input, main_loop
         if ass_text.strip():
             print(f"Assistant: {ass_text}")
             send_text_to_client(ass_text, data_channels, main_loop, channel="server_text", role="assistant")
-            await tts_and_play_kokoro(ass_text)
+            #tts_and_play_kokoro(ass_text)
+            await tts_kokoro_sequence_async([ass_text], speech_signals=speech_signals)
 
 
 def test_vlm_call():
@@ -101,7 +106,7 @@ if __name__ == "__main__":
     # Create and run the server
     config = dict(
         debug=True,
-        rms_thresh=0.05, #0.02,
+        rms_thresh=0.025, #0.02,
         input_video_sample_interval=100,
         filter_gender=None #'male'
     )

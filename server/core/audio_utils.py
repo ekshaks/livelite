@@ -4,6 +4,18 @@ from pydub import AudioSegment
 from io import BytesIO
 
 
+def load_wav_to_array(path: str, target_sr: int = 16000) -> np.ndarray:
+    """Load wav file and return 1-D float32 mono array resampled to 16kHz."""
+    import librosa
+    import soundfile as sf
+    data, sr = sf.read(path, dtype="float32")
+    # If stereo, take mean
+    if data.ndim > 1:
+        data = np.mean(data, axis=1)
+    # Resample if needed
+    if sr != target_sr:
+        data = librosa.resample(data, orig_sr=sr, target_sr=target_sr)
+    return data.astype(np.float32)
 
 
 def show_frame_properties(frame: av.audio.frame.AudioFrame):
