@@ -84,10 +84,24 @@
       gap: 0.5rem;
       padding: 0.5rem 1rem;
       border-radius: 4px;
+      border: 1px solid #e2e8f0;
+      background: white;
+      color: #1a202c;
       cursor: pointer;
-      /*background: var(--card-background-color);*/
-      border: 1px solid var(--card-border-color);
-      color: var(--color); /* Ensure text color is visible */
+      transition: all 0.2s;
+      box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    }
+    
+    .mic-icon {
+      width: 16px;
+      height: 16px;
+      display: inline-block;
+      vertical-align: middle;
+    }
+    
+    .btn-text {
+      display: inline-block;
+      vertical-align: middle;
     }
     .control-btn.active {
       background: var(--primary);
@@ -198,10 +212,6 @@
           <div class="transcription-box">
             <div class="conversation-header">
               <h3>Conversation</h3>
-              <div class="button-group">
-                <button id="startBtn" class="small-btn">Start</button>
-                <button id="stopBtn" class="small-btn secondary" style="display: none;">Stop</button>
-              </div>
             </div>
             <div id="transcriptionText" class="transcription-text"></div>
           </div>
@@ -215,7 +225,8 @@
               <video id="localVideo" autoplay playsinline muted></video>
               <div class="controls">
                 <button id="muteAudioBtn" class="control-btn small-btn" title="UnMute Audio">
-                  <span>UnMute</span>
+                  <img src="assets/mic-off.svg" alt="Mic" class="mic-icon" />
+                  <span class="btn-text">UnMute</span>
                 </button>
                 <button id="stopVideoBtn" class="control-btn small-btn" title="Start Video">
                   <span>Start</span>
@@ -223,10 +234,6 @@
               </div>
             </div>
             
-            <!-- <div class="video-box">
-              <h5>Video Stream (Remote)</h5>
-              <video id="remoteVideo" autoplay playsinline></video>
-            </div> -->
           </div>
         </div>
       </div>
@@ -250,11 +257,19 @@
     function setStatus(s) {
       statusText.textContent = s;
     }
+    function onDataMessage(data) {
+      data = JSON.parse(data);
+      const msg = `${data.role.toUpperCase()}: ${data.content}`;
+      console.log(msg);
+      transcriptionText.textContent += msg + '\n';
+    }
 
     // Initialize pc and data channel immediately on page load.
     (async () => {
         setStatus('Creating PeerConnection & data channel...');
-        await TrackManager.initConnection();
+        await TrackManager.initConnection(
+          onDataMessage
+        );
     })();
 
     // Video toggle: uses replaceTrack internally
@@ -290,26 +305,32 @@
     muteAudioBtn.addEventListener('click', async () => {
       muteAudioBtn.disabled = true;
       try {
-        if (!TrackManager.audioTrack) {
-      setStatus('Initializing audio...');
-      await TrackManager.initAudio();
-      TrackManager.unmuteAudio();
-      audioEnabled = true;
-      muteAudioBtn.querySelector('span').textContent = 'Mute';
-      setStatus('Audio ON');
-    } else {
-      if (audioEnabled) {
-        TrackManager.muteAudio();
-        audioEnabled = false;
-        muteAudioBtn.querySelector('span').textContent = 'Unmute';
-        setStatus('Audio MUTED');
-      } else {
-        TrackManager.unmuteAudio();
-        audioEnabled = true;
-        muteAudioBtn.querySelector('span').textContent = 'Mute';
-        setStatus('Audio ON');
-      }
-    }
+          if (!TrackManager.audioTrack) {
+          setStatus('Initializing audio...');
+          await TrackManager.initAudio();
+          TrackManager.unmuteAudio();
+          audioEnabled = true;
+          const icon = muteAudioBtn.querySelector('img');
+          icon.src = 'assets/mic-on.svg';
+          muteAudioBtn.querySelector('.btn-text').textContent = 'Mute';
+          setStatus('Audio ON');
+        } else {
+          if (audioEnabled) {
+            TrackManager.muteAudio();
+            audioEnabled = false;
+            const icon = muteAudioBtn.querySelector('img');
+            icon.src = 'assets/mic-off.svg';
+            muteAudioBtn.querySelector('.btn-text').textContent = 'Unmute';
+            setStatus('Audio MUTED');
+          } else {
+            TrackManager.unmuteAudio();
+            audioEnabled = true;
+            const icon = muteAudioBtn.querySelector('img');
+            icon.src = 'assets/mic-on.svg';
+            muteAudioBtn.querySelector('.btn-text').textContent = 'Mute';
+            setStatus('Audio ON');
+          }
+        }
       } catch (err) {
         console.error('Audio toggle failed', err);
         setStatus('Audio error: ' + (err?.message ?? err));

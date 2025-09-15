@@ -37,26 +37,23 @@ class Server:
         print('setting up routes..')
         self.app.router.add_post("/offer", self.offer_handler)
         
-        # Serve JavaScript files securely
-        js_dir = client_html_path.parent / "js"
-        async def serve_js(request):
-            # Get the requested path and resolve it to prevent directory traversal
-            requested_path = request.match_info['path']
-            try:
-                # Use pathlib to resolve the full path and ensure it's within the js directory
-                full_path = (js_dir / requested_path).resolve()
-                if not full_path.is_relative_to(js_dir):
-                    raise web.HTTPForbidden()
-                if not full_path.exists():
-                    raise web.HTTPNotFound()
-                return web.FileResponse(full_path)
-            except (ValueError, RuntimeError):
-                # Handle path resolution errors (e.g., path tries to escape the directory)
-                raise web.HTTPForbidden()
+        client_dir = client_html_path.parent  # base directory containing index.html, js/, assets/, etc.
+
+        async def serve_client_file(request):
+            requested_path = request.match_info.get('path', '')
+            if requested_path == '':
+                # root → serve index.html
+                return web.FileResponse(client_html_path)
+
+            # Resolve full path and prevent directory traversal
+            full_path = (client_dir / requested_path).resolve()
+            if not full_path.is_relative_to(client_dir) or not full_path.exists():
+                raise web.HTTPNotFound()
+            return web.FileResponse(full_path)
+
+        # catch-all route
+        self.app.router.add_get("/{path:.*}", serve_client_file)
         
-        self.app.router.add_get("/js/{path:.+}", serve_js)
-        self.app.router.add_get("/", lambda request: web.FileResponse(client_html_path))
-    
     async def handle_audio_track(self, pc, track: MediaStreamTrack, speech_turn_input, stop_event, 
                                 audio_buffer_size, rms_thresh):
         """Handle incoming audio track and process it through the pipeline."""
