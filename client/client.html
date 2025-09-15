@@ -211,22 +211,22 @@
         <div class="videos-column">
           <div class="video-container">
             <div class="video-box">
-              <h5>Video Stream (Local)</h5>
+              <h5>Video Stream</h5>
               <video id="localVideo" autoplay playsinline muted></video>
               <div class="controls">
-                <button id="muteAudioBtn" class="control-btn small-btn" title="Mute Audio">
-                  <span>Mute</span>
+                <button id="muteAudioBtn" class="control-btn small-btn" title="UnMute Audio">
+                  <span>UnMute</span>
                 </button>
-                <button id="stopVideoBtn" class="control-btn small-btn" title="Stop Video">
-                  <span>Stop</span>
+                <button id="stopVideoBtn" class="control-btn small-btn" title="Start Video">
+                  <span>Start</span>
                 </button>
               </div>
             </div>
             
-            <div class="video-box">
+            <!-- <div class="video-box">
               <h5>Video Stream (Remote)</h5>
               <video id="remoteVideo" autoplay playsinline></video>
-            </div>
+            </div> -->
           </div>
         </div>
       </div>
@@ -236,284 +236,93 @@
       </div>
   </div>
 
-  <script>
-      async function logAudioLevels(pc) {
-        // pc = your RTCPeerConnection instance
 
-        setInterval(async () => {
-          const stats = await pc.getStats();
+ <!-- Inline orchestration script (minimal) -->
+  <script type="module">
+    import { TrackManager } from '/js/trackManager.js';
 
-          stats.forEach(report => {
-            // For remote audio tracks (incoming audio from the other peer)
-            if (report.type === "inbound-rtp" && report.kind === "audio") {
-              //console.log("📥 Inbound audio stats:", report);
-              if (report.audioLevel !== undefined) {
-                console.log("Inbound Remote audio level:", report.audioLevel);
-              }
-            }
+    const localVideoEl = document.getElementById('localVideo');
+    const stopVideoBtn = document.getElementById('stopVideoBtn');
+    const muteAudioBtn = document.getElementById('muteAudioBtn');
+    const statusText = document.getElementById('statusText');
+    const transcriptionText = document.getElementById('transcriptionText');
 
-            // For local audio tracks (microphone you send out)
-            if (report.type === "outbound-rtp" && report.kind === "audio") {
-              //console.log("📤 Outbound audio stats:", report);
-            }
-
-            // Some browsers (Chrome/Edge) provide audio level via track stats
-            if (report.type === "track" && report.kind === "audio") {
-              if (report.audioLevel !== undefined) {
-                console.log(`🎤 Track Audio level for ${report.trackIdentifier}:`, report.audioLevel);
-              }
-            }
-          });
-        }, 500); // every 500 ms
-      }
-
-
-  </script>
-
-  <script>
-    let stream = null;
-    let pc = null;
-    let audioTracks = [];
-    let videoTracks = [];
-    let dataChannel;
-    let transcriptionElement = document.getElementById('transcriptionText');
-    const startBtn = document.getElementById('startBtn'); // start streaming
-    const stopBtn = document.getElementById('stopBtn'); // stop streaming
-
-    const muteAudioBtn = document.getElementById('muteAudioBtn'); // mute audio
-    const stopVideoBtn = document.getElementById('stopVideoBtn'); // stop video
-    
-    const statusElement = document.querySelector('.status'); // status container
-    const statusText = document.getElementById('statusText'); // status text
-    
-    const localVideo = document.getElementById('localVideo'); // local video
-    const remoteVideo = document.getElementById('remoteVideo'); // remote video
-
-    function updateStatus(message, isActive = false) {
-      if (statusText) {
-        statusText.textContent = message;
-      }
-      if (statusElement) {
-        statusElement.classList.toggle('active', isActive);
-      }
-      console.log('Status:', message);
+    function setStatus(s) {
+      statusText.textContent = s;
     }
 
-    // Toggle audio mute
-    muteAudioBtn.addEventListener('click', () => {
-      const isMuted = audioTracks[0]?.enabled === false;
-      audioTracks.forEach(track => {
-        track.enabled = isMuted;
-      });
-      const icon = muteAudioBtn.querySelector('span:first-child');
-      const text = muteAudioBtn.querySelector('span:last-child');
-      if (isMuted) {
-        //icon.textContent = '🔇';
-        text.textContent = 'Mute';
-        muteAudioBtn.classList.remove('active');
-      } else {
-        //icon.textContent = '🔊';
-        text.textContent = 'Unmute';
-        muteAudioBtn.classList.add('active');
-      }
-    });
+    // Initialize pc and data channel immediately on page load.
+    (async () => {
+        setStatus('Creating PeerConnection & data channel...');
+        await TrackManager.initConnection();
+    })();
 
-    // Toggle video on/off
-    stopVideoBtn.addEventListener('click', () => {
-      const isStopped = videoTracks.length > 0 && !videoTracks[0].enabled;
-      
-      // Toggle video track
-      videoTracks.forEach(track => {
-        track.enabled = isStopped;
-      });
-      
-      // Toggle local video preview
-      if (isStopped) {
-        // If turning on, set the stream to the video element
-        localVideo.srcObject = stream;
-        localVideo.play().catch(e => console.error("Error playing video:", e));
-      } else {
-        // If turning off, clear the video element
-        localVideo.srcObject = null;
-      }
-      
-      updateTrackReferences(); // Update UI state
-    });
-
-    // Update track references when stream changes
-    function updateTrackReferences() {
-      if (!stream) return;
-      audioTracks = stream.getAudioTracks();
-      videoTracks = stream.getVideoTracks();
-      
-      // Update mute button state
-      const isMuted = audioTracks.length > 0 && !audioTracks[0].enabled;
-      const muteIcon = muteAudioBtn.querySelector('span:first-child');
-      const muteText = muteAudioBtn.querySelector('span:last-child');
-      //muteIcon.textContent = isMuted ? '🔇' : '🔊';
-      muteText.textContent = isMuted ? 'Unmute' : 'Mute';
-      muteAudioBtn.classList.toggle('active', isMuted);
-      
-      // Update video button state
-      const isVideoStopped = videoTracks.length > 0 && !videoTracks[0].enabled;
-      const videoIcon = stopVideoBtn.querySelector('span:first-child');
-      const videoText = stopVideoBtn.querySelector('span:last-child');
-      //videoIcon.textContent = isVideoStopped ? '❌' : '🎥';
-      videoText.textContent = isVideoStopped ? 'Start' : 'Stop';
-      stopVideoBtn.classList.toggle('active', isVideoStopped);
-    }
-
-    async function startStreaming() {
+    // Video toggle: uses replaceTrack internally
+    let videoOn = false;
+    stopVideoBtn.addEventListener('click', async () => {
+      stopVideoBtn.disabled = true;
       try {
-        updateStatus('Requesting media access...', true);
-        
-        // Get user media but don't play it automatically
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: true,
-          video: true
-        });
-        
-        // Update track references but don't set srcObject for localVideo
-        updateTrackReferences();
-        
-        // Create peer connection with ICE servers (optional but recommended)
-        const configuration = {
-          iceServers: [{ urls: 'stun:stun.l.google.com:19302' }]
-        };
-        pc = new RTCPeerConnection(configuration);
-        //pc = new RTCPeerConnection();
-        
-        // Add all tracks to the connection
-        stream.getTracks().forEach(track => {
-          pc.addTrack(track, stream);
-          console.log(`Added ${track.kind} track`);
-        });
-
-        dataChannel = pc.createDataChannel("server_text");
-        dataChannel.onopen = () => {
-          console.log("✅ Data channel open");
-          dataChannel.send("👋 Hello from client!");
-        };
-
-        dataChannel.onmessage = (event) => {
-          console.log("Message from server:", event.data);
-          // Update transcription display
-          if (event.data.trim()) {
-            const data = JSON.parse(event.data);
-            text = `${data.role.toUpperCase()}: ${data.content}\n`;
-            transcriptionElement.textContent += text;
-            // Auto-scroll to bottom
-            transcriptionElement.scrollTop = transcriptionElement.scrollHeight;
-          }
-        };
-
-        dataChannel.onclose = () => {
-          console.log("❌ Data channel closed");
-        };
-
-        // Handle incoming tracks from remote
-        pc.ontrack = (event) => {
-          console.log('Received remote track:', event.track.kind);
-          if (remoteVideo.srcObject !== event.streams[0]) {
-            remoteVideo.srcObject = event.streams[0];
-          }
-        };
-
-        // Handle ICE connection state changes
-        pc.oniceconnectionstatechange = () => {
-          console.log('ICE Connection State:', pc.iceConnectionState);
-          if (pc.iceConnectionState === 'failed' || 
-              pc.iceConnectionState === 'disconnected' ||
-              pc.iceConnectionState === 'closed') {
-            updateStatus(`Connection ${pc.iceConnectionState}`);
-          }
-        };
-
-        updateStatus('Creating offer...', true);
-        const offer = await pc.createOffer({
-          offerToReceiveAudio: true,
-          offerToReceiveVideo: true
-        });
-        await pc.setLocalDescription(offer);
-
-        // Send offer to server
-        updateStatus('Connecting to server...', true);
-        const response = await fetch("http://localhost:9000/offer", {
-          method: "POST",
-          body: JSON.stringify({
-            sdp: pc.localDescription.sdp,
-            type: pc.localDescription.type
-          }),
-          headers: { "Content-Type": "application/json" }
-        });
-
-        if (!response.ok) {
-          throw new Error(`Server error: ${response.status}`);
+        if (!videoOn) {
+          setStatus('Starting local video...');
+          await TrackManager.startVideo(localVideoEl);
+          stopVideoBtn.querySelector('span').textContent = 'Stop Video';
+          stopVideoBtn.title = 'Stop Video';
+          videoOn = true;
+          setStatus('Video ON');
+        } else {
+          setStatus('Stopping local video...');
+          await TrackManager.stopVideo(localVideoEl);
+          stopVideoBtn.querySelector('span').textContent = 'Start Video';
+          stopVideoBtn.title = 'Start Video';
+          videoOn = false;
+          setStatus('Video OFF');
         }
+      } catch (err) {
+        console.error('Video toggle error', err);
+        setStatus('Video error: ' + (err?.message ?? err));
+      } finally {
+        stopVideoBtn.disabled = false;
+      }
+    });
 
-        const answer = await response.json();
-        await pc.setRemoteDescription(answer);
-        
-        // Update UI
-        if (startBtn) {
-          startBtn.style.display = 'none';
-          startBtn.disabled = true;
-        }
-        if (stopBtn) {
-          stopBtn.style.display = 'block';
-          stopBtn.disabled = false;
-        }
-        updateStatus('Streaming active', true);
-        
-        // Log Audio Levels
-        logAudioLevels(pc);
-        
-      } catch (error) {
-        console.error('Error:', error);
-        updateStatus(`Error: ${error.message}`);
-        stopStreaming();
+    // Audio toggle: initialize audio on first press, then mute/unmute
+    let audioEnabled = false;
+    muteAudioBtn.addEventListener('click', async () => {
+      muteAudioBtn.disabled = true;
+      try {
+        if (!TrackManager.audioTrack) {
+      setStatus('Initializing audio...');
+      await TrackManager.initAudio();
+      TrackManager.unmuteAudio();
+      audioEnabled = true;
+      muteAudioBtn.querySelector('span').textContent = 'Mute';
+      setStatus('Audio ON');
+    } else {
+      if (audioEnabled) {
+        TrackManager.muteAudio();
+        audioEnabled = false;
+        muteAudioBtn.querySelector('span').textContent = 'Unmute';
+        setStatus('Audio MUTED');
+      } else {
+        TrackManager.unmuteAudio();
+        audioEnabled = true;
+        muteAudioBtn.querySelector('span').textContent = 'Mute';
+        setStatus('Audio ON');
       }
     }
+      } catch (err) {
+        console.error('Audio toggle failed', err);
+        setStatus('Audio error: ' + (err?.message ?? err));
+      } finally {
+        muteAudioBtn.disabled = false;
+      }
+    });
 
-    function stopStreaming() {
-      if (stream) {
-        // Stop all tracks
-        stream.getTracks().forEach(track => {
-          track.stop();
-          console.log(`Stopped ${track.kind} track`);
-        });
-        stream = null;
-        audioTracks = [];
-        videoTracks = [];
-      }
-      
-      if (pc) {
-        pc.close();
-        pc = null;
-      }
-      
-      // Clear video elements
-      localVideo.srcObject = null;
-      remoteVideo.srcObject = null;
-      
-      // Update UI
-      if (startBtn) {
-        startBtn.style.display = 'block';
-        startBtn.disabled = false;
-      }
-      if (stopBtn) {
-        stopBtn.style.display = 'none';
-        stopBtn.disabled = true;
-      }
-      updateStatus('Streaming stopped');
-    }
-
-    // Event Listeners
-    startBtn.addEventListener('click', startStreaming);
-    stopBtn.addEventListener('click', stopStreaming);
-
-    // Initial status
-    updateStatus('Click Start to begin streaming');
+    // Example: send text via data channel when any server message arrives
+    // - You can also add an input to send messages from client to server using:
+    // TrackManager.sendData("hello server");
+  
+ 
   </script>
 </body>
 </html>
