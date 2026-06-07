@@ -41,7 +41,7 @@ export const TrackManager = {
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
 
-    const res = await fetch("http://localhost:9000/offer", {
+    const res = await fetch("/offer", {
       method: "POST",
       body: JSON.stringify(offer),
       headers: { "Content-Type": "application/json" }
@@ -52,13 +52,20 @@ export const TrackManager = {
 
   /** -------------------- VIDEO -------------------- **/
 
-  async startVideo(localVideoEl) {
+  async startVideo(localVideoEl, useBackCamera=true) {
     if (this.videoTrack) {
       // already active
       this.videoTrack.enabled = true;
       return;
     }
-    const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    const constraints = {
+      video: {
+        //facingMode: useBackCamera ? { exact: "environment" } : "user"
+        facingMode: useBackCamera ? "environment" : "user"
+      }
+    };
+
+    const stream = await navigator.mediaDevices.getUserMedia(constraints);
     this.videoTrack = stream.getVideoTracks()[0];
     await this.videoTransceiver.sender.replaceTrack(this.videoTrack);
 

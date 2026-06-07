@@ -1,34 +1,68 @@
-# WebRTC based audio video pipelines
+# mulive
 
-## Installation
+Real-time voice/video agent framework over WebRTC. Browser streams audio and video to a Python backend, which runs VAD → STT → LLM/VLM → TTS and returns transcript + responses to the browser via a data channel.
+
+## Quickstart
 
 ```bash
-git clone https://github.com/ekshaks/livelite.git
-cd livelite
 pip install -r requirements.txt
+
+# Run the multimodal agent (primary app)
+python -m apps.multimodal_agent
+
+# Or with auto-reload on file changes
+watchfiles --filter python "python -m apps.multimodal_agent"
 ```
 
-## Run basic pipeline
+Open `https://localhost:9000` (HTTPS required for camera/mic access). Click **Start Streaming** and speak. The agent responds in text and via local speakers.
 
-```bash
-cd livelite
-python -m apps.basic_pipeline
+> Note: the server uses a self-signed cert in `server/certs/`. You'll need to accept the browser warning on first load.
+
+## Folder structure
+
+```
+apps/           Agent pipelines (runnable apps)
+client/         Browser-side WebRTC client (HTML + JS)
+server/         WebRTC server + core processing modules
+  core/         VAD, STT, TTS, LLM utils, audio/video utils
+docs/           Architecture reference and task backlog
+data/           Sample audio files for testing
+models/         Local model files
+Kokoro-FastAPI/ Local Kokoro TTS server
 ```
 
-Open browser at http://localhost:9000. Click on "Start Streaming" and start speaking. 
-You should see the transcribed text and the response from the agent.
+## Apps
 
+| App | Status | Description |
+|-----|--------|-------------|
+| `apps/multimodal_agent.py` | ✅ Runnable | Audio + video → VLM agent → TTS with interruption |
+| `apps/basic_pipeline.py` | ⚠️ Needs refactor | Audio-only → LLM → text back to browser |
+| `apps/spell.py` | 🚧 Scaffold | Spelling tutor game concept |
+| `apps/v2v.py` | 🚧 Scaffold | Voice-to-voice variant of spelling tutor |
 
-## Assets
+## Core pipeline
 
-- screenshot of UI
+```
+Browser mic/cam
+    ↓  WebRTC
+server/setup_tracks.py       ← per-session subjects
+    ↓
+core/audio_utils.py          ← resample to 16kHz mono
+core/turndet.py              ← Silero VAD → speech turns
+core/stt.py                  ← Whisper (faster-whisper or mlx)
+    ↓ user text
+apps/<pipeline>.py           ← LLM / VLM agent
+    ↓ assistant text
+client (data channel)        ← text rendered in browser
+core/tts.py                  ← Kokoro TTS → local speakers
+```
 
+## TTS backends
 
+- **Kokoro** (default) — local ONNX model via OpenAI-compatible API (`localhost:8880`). Start with `Kokoro-FastAPI/`.
+- **Gemini TTS** — cloud, via `google-genai`.
 
-## Feature Support
+## Docs
 
-- [ ] STT APIs 
-- [ ] TTS APIs
-- [ ] Google GenAI operators
-- [ ] Pipecat - stt
-- [ ] Livekit
+- [Architecture reference](docs/architecture.md) — component design, data flow, implementation notes
+- [Task backlog](docs/tasks.md) — known bugs and planned work

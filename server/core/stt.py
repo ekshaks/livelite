@@ -125,7 +125,7 @@ class WhisperSTT:
 
 
 
-def run_stt(audio_input, model_size='tiny'):
+def run_stt_rx(audio_input, model_size='tiny'):
     from .utils import rx_ops as ops, rx_Subject as Subject, rx_Observable, rx_interval
     from .turndet import turn_detector_vad
 
