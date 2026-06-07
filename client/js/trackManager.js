@@ -10,6 +10,7 @@ export const TrackManager = {
   // currently active tracks
   videoTrack: null,
   audioTrack: null,
+  remoteAudioEl: null,
 
   onDataMessage: null, // callback
 
@@ -35,6 +36,17 @@ export const TrackManager = {
       if (event.candidate) {
         //console.log("ICE candidate:", event.candidate);
       }
+    };
+
+    this.pc.ontrack = (event) => {
+      if (event.track.kind !== "audio") return;
+      console.log("Remote assistant audio track received");
+      const stream = event.streams[0] || new MediaStream([event.track]);
+      const audioEl = this.ensureRemoteAudioElement();
+      audioEl.srcObject = stream;
+      audioEl.play().catch((err) => {
+        console.warn("Remote audio autoplay blocked:", err);
+      });
     };
 
     // create offer
@@ -90,7 +102,13 @@ export const TrackManager = {
     if (this.audioTrack) {
       return;
     }
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    const stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true
+      }
+    });
     this.audioTrack = stream.getAudioTracks()[0];
     await this.audioTransceiver.sender.replaceTrack(this.audioTrack);
   },
@@ -105,5 +123,20 @@ export const TrackManager = {
     if (this.audioTrack) {
       this.audioTrack.enabled = true;
     }
+  },
+
+  ensureRemoteAudioElement() {
+    if (this.remoteAudioEl) {
+      return this.remoteAudioEl;
+    }
+
+    const audioEl = document.createElement("audio");
+    audioEl.id = "remoteAssistantAudio";
+    audioEl.autoplay = true;
+    audioEl.playsInline = true;
+    audioEl.style.display = "none";
+    document.body.appendChild(audioEl);
+    this.remoteAudioEl = audioEl;
+    return audioEl;
   }
 };

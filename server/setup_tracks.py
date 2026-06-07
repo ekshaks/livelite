@@ -1,8 +1,11 @@
 from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
+from aiortc.mediastreams import MediaStreamError
 import asyncio
+import json
 
 from .core.audio_utils import convert_and_resample_frame
 from .core.audio_utils import is_active_speaker
+from .core.webrtc_audio import AssistantAudioTrack
 from .core.utils import rx_Subject as Subject # for input audio/video subjects
 import numpy as np
 
@@ -83,6 +86,9 @@ def pc_pipeline_setup(create_pipeline, config):
     
     stop_event = asyncio.Event()
     data_channels = {}
+    assistant_audio_track = AssistantAudioTrack()
+    pc.assistant_audio_track = assistant_audio_track
+    pc.addTrack(assistant_audio_track)
 
     def on_datachannel(channel):
         print(f"Data channel received: {channel.label}")
