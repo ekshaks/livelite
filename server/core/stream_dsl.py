@@ -139,6 +139,12 @@ def turn_detector(name: str = "turn_detector", **kwargs):
 
 
 def whisper_stt(name: str = "whisper_stt", model_size: str = "tiny", mode: str = "mlx", **kwargs):
+    if mode == "mlx":
+        from .stt_mlx import MlxPinnedWhisper
+
+        mlx_stt = MlxPinnedWhisper(model_size=model_size, **kwargs)
+        return async_map_stage(mlx_stt.transcribe, name=name, on_dispose=mlx_stt.shutdown)
+
     from .stt import WhisperSTT
 
     stt = WhisperSTT(mode=mode, model_size=model_size, **kwargs)
@@ -149,7 +155,16 @@ def whisper_stt(name: str = "whisper_stt", model_size: str = "tiny", mode: str =
     return apply
 
 
-def async_map_stage(func, name: str = "async_stage", concurrency: str = "serial"):
+def drop_while(predicate: Callable[[], bool], name: str = "drop_while"):
+    """Drop stream items while a zero-argument predicate is true."""
+
+    def apply(stream: Stream):
+        return stream.pipe(ops.filter(lambda item: not predicate()), name=name)
+
+    return apply
+
+
+def async_map_stage(func, name: str = "async_stage", concurrency: str = "serial", on_dispose: Optional[Callable[[], None]] = None):
     """Serial async transform stage. Other concurrency policies are future work."""
 
     if concurrency != "serial":
@@ -160,6 +175,7 @@ def async_map_stage(func, name: str = "async_stage", concurrency: str = "serial"
 
         subject = Subject()
         task = None
+        upstream_sub = None
         source_sub = None
 
         async def worker(queue: asyncio.Queue):
@@ -176,20 +192,42 @@ def async_map_stage(func, name: str = "async_stage", concurrency: str = "serial"
                     subject.on_error(exc)
 
         def ensure_connected():
-            nonlocal task, source_sub
+            nonlocal task, upstream_sub, source_sub
             if source_sub is not None:
-                return CompositeDisposable(source_sub, Disposable(lambda: task.cancel() if task else None))
+                def dispose_existing():
+                    if task is not None:
+                        task.cancel()
+                    if on_dispose is not None:
+                        on_dispose()
+
+                disposable = CompositeDisposable()
+                if upstream_sub is not None:
+                    disposable.add(upstream_sub)
+                disposable.add(source_sub)
+                disposable.add(Disposable(dispose_existing))
+                return disposable
 
             loop = asyncio.get_running_loop()
             queue = asyncio.Queue()
             task = loop.create_task(worker(queue))
+            upstream_sub = stream._on_subscribe() if stream._on_subscribe else None
 
             source_sub = stream.observable.subscribe(
                 on_next=lambda item: queue.put_nowait(item),
                 on_error=subject.on_error,
                 on_completed=lambda: queue.put_nowait(None),
             )
-            return CompositeDisposable(source_sub, Disposable(lambda: task.cancel()))
+            def dispose():
+                task.cancel()
+                if on_dispose is not None:
+                    on_dispose()
+
+            disposable = CompositeDisposable()
+            if upstream_sub is not None:
+                disposable.add(upstream_sub)
+            disposable.add(source_sub)
+            disposable.add(Disposable(dispose))
+            return disposable
 
         return Stream(subject, name=name, on_subscribe=ensure_connected)
 

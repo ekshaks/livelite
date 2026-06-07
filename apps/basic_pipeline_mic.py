@@ -1,10 +1,11 @@
 import argparse
 import asyncio
+import threading
 
 import sounddevice as sd
 from reactivex.subject import Subject
 
-from server.core.stream_dsl import Stream, SubGroup, print_sink, turn_detector, whisper_stt
+from server.core.stream_dsl import Stream, SubGroup, drop_while, print_sink, turn_detector, whisper_stt
 from server.core.stream_tts import KokoroTTSProvider, PlaybackState, tts_sink
 
 
@@ -12,10 +13,18 @@ async def run_mic_pipeline(args):
     audio_input = Subject()
     subs = SubGroup()
     playback_state = PlaybackState() if args.tts else None
+    mic_muted = threading.Event()
+    stop_event = asyncio.Event()
 
     audio = Stream.source(audio_input, name="mic_audio")
     turn = audio | turn_detector()
-    user_text = turn.segments | whisper_stt(mode="faster_whisper", model_size=args.model_size)
+    segments = turn.segments
+    if playback_state is not None and args.allow_interruptions:
+        segments = segments | drop_while(
+            lambda: playback_state.is_playing_or_recent(args.echo_suppress_seconds),
+            name="drop_tts_feedback",
+        )
+    user_text = segments | whisper_stt(mode="mlx", model_size=args.model_size)
 
     user_text.to(print_sink(prefix="User: "), name="print_user_text", subs=subs)
 
@@ -30,7 +39,10 @@ async def run_mic_pipeline(args):
             name="kokoro_tts",
             subs=subs,
         )
-        print("TTS enabled. Mic packets are discarded during playback.")
+        if args.allow_interruptions:
+            print(f"TTS enabled. VAD stays active; STT segments are dropped during playback and for {args.echo_suppress_seconds}s after.")
+        else:
+            print("TTS enabled. Mic packets are muted during playback.")
 
 
     # Pickup audio from microphone and feed it to the pipeline (via audio_input Subject)
@@ -38,12 +50,30 @@ async def run_mic_pipeline(args):
     def callback(indata, frames, time_info, status):
         if status:
             print(f"mic status: {status}")
-        if playback_state is not None and playback_state.is_playing():
+        if mic_muted.is_set():
+            return
+        if playback_state is not None and not args.allow_interruptions and playback_state.is_playing():
             return
         samples = indata[:, 0].copy()
         audio_input.on_next(samples)
 
-    print("Listening. Speak, then pause for transcription. Press Ctrl-C to stop.")
+    async def keyboard_controls():
+        while not stop_event.is_set():
+            command = (await asyncio.to_thread(input, "")).strip().lower()
+            if command == "m":
+                if mic_muted.is_set():
+                    mic_muted.clear()
+                    print("Mic unmuted.")
+                else:
+                    mic_muted.set()
+                    print("Mic muted.")
+            elif command == "q":
+                stop_event.set()
+
+    controls_task = asyncio.create_task(keyboard_controls())
+
+    print("Listening. Speak, then pause for transcription.")
+    print("Controls: m + Enter toggles mic mute, q + Enter stops, Ctrl-C also stops.")
     try:
         with sd.InputStream(
             samplerate=args.sample_rate,
@@ -52,9 +82,11 @@ async def run_mic_pipeline(args):
             blocksize=args.block_size,
             callback=callback,
         ):
-            while True:
+            while not stop_event.is_set():
                 await asyncio.sleep(0.25)
     finally:
+        stop_event.set()
+        controls_task.cancel()
         audio_input.on_completed()
         subs.dispose()
 
@@ -65,6 +97,8 @@ def parse_args():
     parser.add_argument("--block-size", type=int, default=8000)
     parser.add_argument("--model-size", default="tiny")
     parser.add_argument("--tts", action="store_true", help="Speak transcribed text with Kokoro TTS.")
+    parser.add_argument("--echo-suppress-seconds", type=float, default=2.0)
+    parser.add_argument("--allow-interruptions", action="store_true", help="Keep VAD active during TTS so speech can interrupt playback.")
     return parser.parse_args()
 
 

@@ -1,5 +1,6 @@
 import asyncio
 import threading
+import time
 from typing import Any, Optional, Protocol
 
 from reactivex.disposable import CompositeDisposable, Disposable
@@ -15,15 +16,22 @@ class PlaybackState:
 
     def __init__(self):
         self._playing = threading.Event()
+        self._last_stopped_at = 0.0
 
     def set_playing(self, playing: bool):
         if playing:
             self._playing.set()
         else:
+            self._last_stopped_at = time.monotonic()
             self._playing.clear()
 
     def is_playing(self) -> bool:
         return self._playing.is_set()
+
+    def is_playing_or_recent(self, cooldown_seconds: float) -> bool:
+        if self.is_playing():
+            return True
+        return (time.monotonic() - self._last_stopped_at) < cooldown_seconds
 
 
 def _as_observable(stream_or_observable: Any):
@@ -102,10 +110,26 @@ def tts_sink(
 
 
 class KokoroTTSProvider:
-    async def speak(self, text: str, interrupt_event: asyncio.Event) -> None:
-        from .tts import tts_kokoro_stream_async
+    def __init__(self, mode: str = "local", audio_track: Optional[Any] = None):
+        self.mode = mode
+        self.audio_track = audio_track
 
-        await tts_kokoro_stream_async(text, interrupt_event)
+    async def speak(self, text: str, interrupt_event: asyncio.Event) -> None:
+        if self.mode == "local":
+            from .tts import tts_kokoro_stream_async
+
+            await tts_kokoro_stream_async(text, interrupt_event)
+            return
+
+        if self.mode == "webrtc":
+            from .tts import tts_kokoro_to_track_async
+
+            if self.audio_track is None:
+                raise ValueError("audio_track is required for KokoroTTSProvider(mode='webrtc')")
+            await tts_kokoro_to_track_async(text, interrupt_event, self.audio_track)
+            return
+
+        raise ValueError(f"Unknown Kokoro TTS mode: {self.mode}")
 
 
 def kokoro_tts_sink(interrupts: Optional[Any] = None, name: str = "kokoro_tts"):

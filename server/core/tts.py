@@ -223,13 +223,11 @@ def _print_tts_metrics(timings, chunk_count):
     print("---  ---\n")
 
 
-async def tts_kokoro_stream_async(text, interrupt_event):
-    """Non-blocking version of tts_kokoro_stream using asyncio."""
+async def _tts_kokoro_stream_chunks(text, interrupt_event, on_audio_block):
+    """Stream Kokoro PCM blocks and delegate output to `on_audio_block`."""
     from openai import AsyncOpenAI
-    import sounddevice as sd
     import numpy as np
     
-    # Initialize timing metrics
     timings = {
         'start': time.perf_counter(),
         'first_buffer_received': None,
@@ -239,10 +237,6 @@ async def tts_kokoro_stream_async(text, interrupt_event):
     samplerate = 22050  
     blocksize = 1024
     chunk_count = 0
-
-    # Initialize audio stream
-    stream = sd.OutputStream(samplerate=samplerate, channels=1, dtype='int16')
-    stream.start()
     
     try:
         client = AsyncOpenAI(
@@ -267,22 +261,41 @@ async def tts_kokoro_stream_async(text, interrupt_event):
                     break
                     
                 audio_block = np.frombuffer(chunk, dtype=np.int16)
-                #stream.write(audio_block)
-                # Run the blocking write in a thread
-                loop = asyncio.get_event_loop()
-                await loop.run_in_executor(None, stream.write, audio_block)
+                await on_audio_block(audio_block, samplerate)
                 chunk_count += 1
                 
     except Exception as e:
         print(f"Error during TTS streaming: {e}")
     finally:
-        # Ensure resources are cleaned up
-        stream.stop()
-        stream.close()
-        
-        # Record end time and print metrics
         timings['end'] = time.perf_counter()
         _print_tts_metrics(timings, chunk_count)
+
+
+async def tts_kokoro_stream_async(text, interrupt_event):
+    """Stream Kokoro TTS to the local speaker."""
+    import sounddevice as sd
+
+    stream = sd.OutputStream(samplerate=22050, channels=1, dtype='int16')
+    stream.start()
+
+    async def write_local(audio_block, samplerate):
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, stream.write, audio_block)
+
+    try:
+        await _tts_kokoro_stream_chunks(text, interrupt_event, write_local)
+    finally:
+        stream.stop()
+        stream.close()
+
+
+async def tts_kokoro_to_track_async(text, interrupt_event, audio_track):
+    """Stream Kokoro TTS PCM into an outbound WebRTC audio track."""
+
+    async def write_track(audio_block, samplerate):
+        await audio_track.write_pcm(audio_block, sample_rate=samplerate)
+
+    await _tts_kokoro_stream_chunks(text, interrupt_event, write_track)
 
 async def tts_kokoro_sequence_async(texts, speech_signals=None):
     interrupt_event = asyncio.Event()
