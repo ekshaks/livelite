@@ -5,6 +5,37 @@ from reactivex import Observable as rx_Observable, interval as rx_interval
 from reactivex import operators as rx_ops
 from reactivex.scheduler.eventloop import AsyncIOScheduler
 
+import time
+
+import time
+import functools
+import asyncio
+
+def timeit(name: str = ""):
+    def decorator(func):
+        if asyncio.iscoroutinefunction(func):
+            @functools.wraps(func)
+            async def async_wrapper(*args, **kwargs):
+                start_time = time.perf_counter()
+                result = await func(*args, **kwargs)
+                end_time = time.perf_counter()
+                runtime = end_time - start_time
+                print(f"{name or func.__name__} took {runtime:.4f} seconds to complete")
+                return result
+            return async_wrapper
+        else:
+            @functools.wraps(func)
+            def sync_wrapper(*args, **kwargs):
+                start_time = time.perf_counter()
+                result = func(*args, **kwargs)
+                end_time = time.perf_counter()
+                runtime = end_time - start_time
+                print(f"{name or func.__name__} took {runtime:.4f} seconds to complete")
+                return result
+            return sync_wrapper
+    return decorator
+
+    
 def rx_to_async_iter(rx_observable, debug=False):
     """Convert RxPY Observable to AsyncIterable of ProcessorPart."""
     queue = asyncio.Queue()
@@ -44,21 +75,21 @@ def send_text_to_client(text, data_channels, loop, role="user", channel="server_
 
 
 class Memory:
-    from agno.memory.v2.memory import Memory
-    from agno.memory.v2.db.sqlite import SqliteMemoryDb
-    from agno.models.message import Message
-
-
     def __init__(self):
+        from agno.memory.v2.memory import Memory as AgnoMemory
+        from agno.memory.v2.db.sqlite import SqliteMemoryDb
+        from agno.models.message import Message
+
+        self.Message = Message
         memory_db = SqliteMemoryDb(table_name="user_memories", db_file="tmp/agent.db")
-        self.memory = Memory(
+        self.memory = AgnoMemory(
             db=memory_db
         )
     
     def add(self, content, role, user_id="default", session_id=None):
         self.memory.create_user_memories(
             messages=[
-                Message(role=role, content=content),
+                self.Message(role=role, content=content),
             ],
             user_id=user_id,
             session_id=session_id
