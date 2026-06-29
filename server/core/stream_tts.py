@@ -65,12 +65,17 @@ def tts_sink(
         disposable = CompositeDisposable()
 
         def on_signal(event):
+            print(f"[interrupt] {name} received {event}")
             if str(event) == "SPEECH_START":
                 interrupt_event.set()
                 if clear_queue_on_interrupt:
                     _clear_queue(queue)
+                clear_output = getattr(provider, "clear_output", None)
+                if clear_output is not None:
+                    clear_output()
             elif str(event) == "SPEECH_END":
                 interrupt_event.clear()
+            print(f"[interrupt] {name} interrupt_event set={interrupt_event.is_set()}")
 
         async def worker():
             while True:
@@ -81,7 +86,9 @@ def tts_sink(
                     try:
                         if state is not None:
                             state.set_playing(True)
+                        print(f"[interrupt] {name} speak start")
                         await provider.speak(text, interrupt_event)
+                        print(f"[interrupt] {name} speak end interrupted={interrupt_event.is_set()}")
                     except asyncio.CancelledError:
                         raise
                     except Exception as exc:
@@ -130,6 +137,10 @@ class KokoroTTSProvider:
             return
 
         raise ValueError(f"Unknown Kokoro TTS mode: {self.mode}")
+
+    def clear_output(self) -> None:
+        if self.mode == "webrtc" and self.audio_track is not None and hasattr(self.audio_track, "clear"):
+            self.audio_track.clear()
 
 
 def kokoro_tts_sink(interrupts: Optional[Any] = None, name: str = "kokoro_tts"):

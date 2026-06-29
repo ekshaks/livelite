@@ -262,6 +262,7 @@
       const msg = `${data.role.toUpperCase()}: ${data.content}`;
       console.log(msg);
       transcriptionText.textContent += msg + '\n';
+      transcriptionText.scrollTop = transcriptionText.scrollHeight;
     }
 
     // Initialize pc and data channel immediately on page load.

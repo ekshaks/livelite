@@ -65,4 +65,5 @@ core/tts.py                  ← Kokoro TTS → local speakers
 ## Docs
 
 - [Architecture reference](docs/architecture.md) — component design, data flow, implementation notes
-- [Task backlog](docs/tasks.md) — known bugs and planned work
+- [Open problems](docs/private/open_problems.md) — known runtime and product gaps
+- [Test plan](docs/private/test_plan.md) — application verification strategy

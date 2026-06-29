@@ -4,6 +4,9 @@ from PIL import Image as PILImage
 import base64
 import io
 
+from .logging_utils import log_text_block, monitor_log
+from .utils import timeit
+
 async def vlm_agent(text, last_frame, PROMPTS_FILE, system_prompt_id='vlm_math'):
     from PIL import Image
     import google.generativeai as genai
@@ -21,11 +24,11 @@ async def vlm_agent(text, last_frame, PROMPTS_FILE, system_prompt_id='vlm_math')
     if last_frame is not None:
         pil_image = Image.fromarray(last_frame.to_ndarray(format='rgb24'))
         prompt_parts.append(pil_image)
-    print('call vlm agent', prompt_parts)
+    monitor_log(f"call_vlm_agent prompt_parts={len(prompt_parts)} has_image={last_frame is not None}")
     
     # Send the request to the API
     response = model.generate_content(prompt_parts)
-    print(response.text)
+    log_text_block("RAW VLM RESPONSE", response.text)
     return response
 
 
@@ -48,7 +51,7 @@ async def call_vlm_agent(agent, text, last_frame):
     # markdown=True,
     # )
 
-    print('last frame ', last_frame)
+    monitor_log(f"call_vlm_agent last_frame_present={last_frame is not None}")
     last_frame: 'av.video.frame.VideoFrame'
     if last_frame is not None:
         buffer = io.BytesIO()
@@ -65,6 +68,15 @@ async def call_vlm_agent(agent, text, last_frame):
         images=images,
         #stream=True,
     )
-    print(response.content)
+    log_text_block("RAW VLM RESPONSE", response.content)
 
     return response
+
+
+@timeit(name="Call_LLM")
+async def call_llm(agent, text, last_frame, mode="av"):
+    if mode == "av":
+        response = await call_vlm_agent(agent, text, last_frame)
+        return response.content
+    response = await agent.arun(text)
+    return response.content

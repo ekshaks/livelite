@@ -9,3 +9,4 @@ google-genai
 librosa
 kokoro-onnx
 sounddevice
+text2num>=3,<4

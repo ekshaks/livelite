@@ -1,23 +1,24 @@
 from typing import Callable, Dict, Set, Any, Awaitable
 from pathlib import Path
+import ssl
 from aiohttp import web
 from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc import MediaStreamError
 
 from .core.utils import rx_Subject as Subject # for input audio/video subjects
-from .setup_tracks import pc_pipeline_setup
+from .setup_tracks import pc_session_setup
 
 DEFAULT_CLIENT_HTML_PATH = Path(__file__).parent.parent / "client/client.html"
 
 class Server:
-    def __init__(self, create_pipeline: Callable, client_html_path: Path = DEFAULT_CLIENT_HTML_PATH, config: Dict = {}):
-        """Initialize the WebRTC server with a pipeline creation function.
+    def __init__(self, run_session: Callable, client_html_path: Path = DEFAULT_CLIENT_HTML_PATH, config: Dict = {}):
+        """Initialize the WebRTC server with a session runner.
         
         Args:
-            create_pipeline: A function that creates and returns a media processing pipeline.
+            run_session: Async function that owns one SessionContext lifecycle.
         """
 
-        self.create_pipeline = create_pipeline
+        self.run_session = run_session
         self.pcs: Set[RTCPeerConnection] = set()
         self.app = web.Application()
         self._setup_routes(client_html_path)
@@ -52,7 +53,7 @@ class Server:
     async def offer_handler(self, request):
         """Handle WebRTC offer and set up media processing pipeline."""
         params = await request.json()
-        pc = pc_pipeline_setup(self.create_pipeline, self.config)
+        pc = pc_session_setup(self.run_session, self.config)
         self.pcs.add(pc)
  
         
@@ -68,7 +69,6 @@ class Server:
             })
         except Exception as e:
             print(f"Error in offer handler: {e}")
-            stop_event.set()
             self.pcs.discard(pc)
             await pc.close()
             raise web.HTTPInternalServerError(text=str(e))
@@ -81,8 +81,13 @@ class Server:
             await pc.close()
         self.pcs.clear()
     
-    def run(self, host="localhost", port=9000):
-        web.run_app(self.app, host=host, port=port)
+    def run(self, host="0.0.0.0", port=9000):
+        ssl_context = None
+        ssl_keyfile = self.config.get("ssl_keyfile")
+        ssl_certfile = self.config.get("ssl_certfile")
+        if ssl_keyfile and ssl_certfile:
+            ssl_context = ssl.create_default_context(ssl.Purpose.CLIENT_AUTH)
+            ssl_context.load_cert_chain(ssl_certfile, ssl_keyfile)
+            print(f"Serving HTTPS on {host}:{port}")
 
-
-
+        web.run_app(self.app, host=host, port=port, ssl_context=ssl_context)

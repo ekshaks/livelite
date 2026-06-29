@@ -62,6 +62,15 @@ export const TrackManager = {
     await this.pc.setRemoteDescription(answer);
   },
 
+  async getUserMedia(constraints) {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error(
+        "Camera/mic unavailable. Open this page over HTTPS on a supported browser; phone access over plain HTTP will not expose getUserMedia."
+      );
+    }
+    return navigator.mediaDevices.getUserMedia(constraints);
+  },
+
   /** -------------------- VIDEO -------------------- **/
 
   async startVideo(localVideoEl, useBackCamera=true) {
@@ -77,7 +86,7 @@ export const TrackManager = {
       }
     };
 
-    const stream = await navigator.mediaDevices.getUserMedia(constraints);
+    const stream = await this.getUserMedia(constraints);
     this.videoTrack = stream.getVideoTracks()[0];
     await this.videoTransceiver.sender.replaceTrack(this.videoTrack);
 
@@ -102,7 +111,8 @@ export const TrackManager = {
     if (this.audioTrack) {
       return;
     }
-    const stream = await navigator.mediaDevices.getUserMedia({
+    await this.unlockRemoteAudio();
+    const stream = await this.getUserMedia({
       audio: {
         echoCancellation: true,
         noiseSuppression: true,
@@ -111,6 +121,16 @@ export const TrackManager = {
     });
     this.audioTrack = stream.getAudioTracks()[0];
     await this.audioTransceiver.sender.replaceTrack(this.audioTrack);
+  },
+
+  async unlockRemoteAudio() {
+    const audioEl = this.ensureRemoteAudioElement();
+    audioEl.muted = false;
+    try {
+      await audioEl.play();
+    } catch (err) {
+      console.warn("Remote audio unlock failed:", err);
+    }
   },
 
   muteAudio() {

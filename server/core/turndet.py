@@ -56,6 +56,7 @@ def turn_detector_vad(silence_timeout: float = 1.0, poll_interval: float = 0.1,
         #print('processing chunk..', chunk.shape)
         if is_speech(chunk):
             if not buffer:  # just started speaking
+                print("[interrupt] VAD SPEECH_START")
                 signal_subject.on_next(SpeechEvent.SPEECH_START)
             buffer.append(chunk)
             last_speech_time[0] = time.time()
@@ -63,6 +64,7 @@ def turn_detector_vad(silence_timeout: float = 1.0, poll_interval: float = 0.1,
     def check_silence(_):
         #print('checking silence..')
         if buffer and (time.time() - last_speech_time[0]) >= silence_timeout:
+            print("[interrupt] VAD SPEECH_END")
             signal_subject.on_next(SpeechEvent.SPEECH_END)
             print('silence detected')
             try:
