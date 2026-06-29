@@ -256,8 +256,10 @@ async def _tts_kokoro_stream_chunks(text, interrupt_event, on_audio_block):
                 if first_chunk:
                     timings['first_buffer_received'] = time.perf_counter()
                     first_chunk = False
+                    print("[interrupt] kokoro first chunk")
                 
                 if interrupt_event.is_set():
+                    print("[interrupt] kokoro break on interrupt")
                     break
                     
                 audio_block = np.frombuffer(chunk, dtype=np.int16)

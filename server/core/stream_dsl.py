@@ -6,6 +6,8 @@ from typing import Any, Callable, Dict, Optional
 from reactivex import operators as ops
 from reactivex.disposable import CompositeDisposable, Disposable
 
+from .logging_utils import monitor_log
+
 
 class Sub:
     """Disposable returned by `.to(...)`."""
@@ -76,10 +78,10 @@ class Stream:
             on_subscribe=self._on_subscribe,
         )
 
-    def latest(self, name: Optional[str] = None):
+    def latest(self, name: Optional[str] = None, subs: Optional[SubGroup] = None):
         # Side input helper. It samples the newest value when another stage asks.
         latest_value = LatestValue(name=name or self.name)
-        upstream_sub = self.to(latest_value.sink(), name=f"{name or self.name}.latest")
+        upstream_sub = self.to(latest_value.sink(), name=f"{name or self.name}.latest", subs=subs)
         latest_value._sub = upstream_sub
         return latest_value
 
@@ -139,6 +141,8 @@ def turn_detector(name: str = "turn_detector", **kwargs):
 
 
 def whisper_stt(name: str = "whisper_stt", model_size: str = "tiny", mode: str = "mlx", **kwargs):
+    """Create an STT stage. Use `model_size="medium"` for better letter recognition."""
+
     if mode == "mlx":
         from .stt_mlx import MlxPinnedWhisper
 
@@ -160,6 +164,24 @@ def drop_while(predicate: Callable[[], bool], name: str = "drop_while"):
 
     def apply(stream: Stream):
         return stream.pipe(ops.filter(lambda item: not predicate()), name=name)
+
+    return apply
+
+
+def filter_items(predicate: Callable[[Any], bool], name: str = "filter_items"):
+    """Keep stream items that satisfy an item-level predicate."""
+
+    def apply(stream: Stream):
+        return stream.pipe(ops.filter(predicate), name=name)
+
+    return apply
+
+
+def map_items(mapper: Callable[[Any], Any], name: str = "map_items"):
+    """Map each stream item with a synchronous item-level function."""
+
+    def apply(stream: Stream):
+        return stream.pipe(ops.map(mapper), name=name)
 
     return apply
 
@@ -244,7 +266,7 @@ def client_text_sink(data_channels: Dict[str, Any], loop, role: str, channel: st
     def attach(observable):
         def on_next(text):
             # Data channel sends must hop back to the WebRTC event loop.
-            print(f"sending to client: {text}")
+            monitor_log(f"sending {role} text to client chars={len(str(text))}")
             try:
                 data_channel = data_channels.get(channel)
                 if data_channel and data_channel.readyState == "open":

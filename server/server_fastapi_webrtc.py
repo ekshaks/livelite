@@ -8,23 +8,23 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 import uvicorn
 
 from .core.utils import rx_Subject as Subject
-from .setup_tracks import pc_pipeline_setup
+from .setup_tracks import pc_session_setup
 
 DEFAULT_CLIENT_HTML_PATH = Path(__file__).parent.parent / "client/client.html"
 
 class Server:
-    def __init__(self, create_pipeline: Callable, client_html_path: Path = DEFAULT_CLIENT_HTML_PATH, config: Dict = None):
-        """Initialize the WebRTC server with a pipeline creation function.
+    def __init__(self, run_session: Callable, client_html_path: Path = DEFAULT_CLIENT_HTML_PATH, config: Dict = None):
+        """Initialize the WebRTC server with a session runner.
         
         Args:
-            create_pipeline: A function that creates and returns a media processing pipeline.
+            run_session: Async function that owns one SessionContext lifecycle.
             client_html_path: Path to the client HTML file.
             config: Configuration dictionary.
         """
         if config is None:
             config = {}
             
-        self.create_pipeline = create_pipeline
+        self.run_session = run_session
         self.pcs: Set[RTCPeerConnection] = set()
         self.app = FastAPI()
         self.client_dir = client_html_path.parent
@@ -74,9 +74,10 @@ class Server:
     
     async def offer_handler(self, request: Request):
         """Handle WebRTC offer and set up media processing pipeline."""
+        pc = None
         try:
             params = await request.json()
-            pc = pc_pipeline_setup(self.create_pipeline, self.config)
+            pc = pc_session_setup(self.run_session, self.config)
             self.pcs.add(pc)
             
             offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])
@@ -91,6 +92,9 @@ class Server:
             
         except Exception as e:
             print(f"Error in offer handler: {e}")
+            if pc is not None:
+                self.pcs.discard(pc)
+                await pc.close()
             raise HTTPException(status_code=500, detail=str(e))
     
     async def on_shutdown(self):
@@ -121,9 +125,10 @@ class Server:
 # For running directly with python -m
 if __name__ == "__main__":
     # Example usage
-    async def create_pipeline(pc, data_channels, audio_input, video_input, loop):
-        """Example pipeline creation function."""
-        print("Pipeline created")
+    async def run_session(session):
+        """Example session runner."""
+        await session.wait_until_ready()
+        print("Session ready")
     
-    server = Server(create_pipeline)
+    server = Server(run_session)
     server.run()

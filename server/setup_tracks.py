@@ -6,6 +6,7 @@ import json
 from .core.audio_utils import convert_and_resample_frame
 from .core.audio_utils import is_active_speaker
 from .core.webrtc_audio import AssistantAudioTrack
+from .core.session import SessionContext
 from .core.utils import rx_Subject as Subject # for input audio/video subjects
 import numpy as np
 
@@ -71,16 +72,16 @@ async def setup_video_track(pc, track: MediaStreamTrack, video_obs_input, stop_e
                 
         except MediaStreamError:
             print("Video track ended")
-            stop_event.set()
+            video_obs_input.on_next(None)
             break
         except Exception as e:
             print(f"Error processing video: {e}")
-            stop_event.set()
+            video_obs_input.on_next(None)
             break
     
     print("Video processing stopped")
 
-def pc_pipeline_setup(create_pipeline, config):
+def pc_session_setup(run_session, config):
     
     pc = RTCPeerConnection()
     
@@ -89,23 +90,50 @@ def pc_pipeline_setup(create_pipeline, config):
     assistant_audio_track = AssistantAudioTrack()
     pc.assistant_audio_track = assistant_audio_track
     pc.addTrack(assistant_audio_track)
+    main_loop = asyncio.get_running_loop()
+    audio_input, video_input = Subject(), Subject()
+    session = SessionContext(
+        pc=pc,
+        data_channels=data_channels,
+        audio_input=audio_input,
+        video_input=video_input,
+        main_loop=main_loop,
+    )
+
+    def update_ready():
+        server_text = data_channels.get("server_text")
+        if pc.connectionState == "connected" and server_text is not None and server_text.readyState == "open":
+            session.ready.set()
 
     def on_datachannel(channel):
         print(f"Data channel received: {channel.label}")
         data_channels[channel.label] = channel
+
+        @channel.on("open")
+        def on_open():
+            update_ready()
+
+        @channel.on("close")
+        def on_close():
+            if channel.label == "server_text":
+                stop_event.set()
+                session.closed.set()
 
         @channel.on("message")
         def on_message(message):
             print("Message from client:", message)
             response = json.dumps({"role": "assistant", "content": "Hello from Assistant!"})
             data_channels[channel.label].send(response)
+
+        update_ready()
     
     pc.on("datachannel", on_datachannel)
-    
-    main_loop = asyncio.get_running_loop()
-    audio_input, video_input = Subject(), Subject()
-    # audio/video input -> main pipeline
-    asyncio.create_task(create_pipeline(pc, data_channels, audio_input, video_input, main_loop))
+
+    # The session runner owns app behavior for this peer and can wait for
+    # session.ready before producing its first output.
+    session_task = asyncio.create_task(run_session(session))
+    pc.session_context = session
+    pc.session_task = session_task
     
     def on_track(track: MediaStreamTrack):
         print(f"Track received: {track.kind}")
@@ -121,8 +149,12 @@ def pc_pipeline_setup(create_pipeline, config):
     
     async def on_connectionstatechange():
         print(f"Connection state changed to: {pc.connectionState}")
+        update_ready()
         if pc.connectionState in ["failed", "closed"]:
             stop_event.set()
+            session.closed.set()
+            if not session_task.done():
+                session_task.cancel()
             # pcs.discard(pc) #TODO: add
             await pc.close()
     
