@@ -5,7 +5,15 @@ import threading
 import sounddevice as sd
 from reactivex.subject import Subject
 
-from server.core.stream_dsl import Stream, SubGroup, drop_while, print_sink, turn_detector, whisper_stt
+from server.core.stream_dsl import (
+    Stream,
+    SubGroup,
+    drop_while,
+    final_transcript_text,
+    print_sink,
+    turn_detector,
+    whisper_stt,
+)
 from server.core.stream_tts import KokoroTTSProvider, PlaybackState, tts_sink
 
 
@@ -24,7 +32,8 @@ async def run_mic_pipeline(args):
             lambda: playback_state.is_playing_or_recent(args.echo_suppress_seconds),
             name="drop_tts_feedback",
         )
-    user_text = segments | whisper_stt(mode="mlx", model_size=args.model_size)
+    transcripts = segments | whisper_stt(mode="mlx", model_size=args.model_size)
+    user_text = transcripts | final_transcript_text()
 
     user_text.to(print_sink(prefix="User: "), name="print_user_text", subs=subs)
 

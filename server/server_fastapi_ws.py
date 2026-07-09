@@ -15,7 +15,7 @@ app.mount("/client", StaticFiles(directory=frontend_dir), name="client")
 
 @app.get("/", response_class=FileResponse)
 async def index():
-    return FileResponse(frontend_dir / "client_full.html")
+    return FileResponse(frontend_dir / "websocket/client.html")
 
 
 @app.websocket("/ws")

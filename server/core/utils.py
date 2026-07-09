@@ -59,21 +59,6 @@ def rx_to_async_iter(rx_observable, debug=False):
 
     return generator()
 
-
-
-def send_text_to_client(text, data_channels, loop, role="user", channel="server_text"):
-    import json
-    print(f"sending to client: {text}")
-    try:
-        channel = data_channels.get(channel)
-        if channel and channel.readyState == "open":
-            data = json.dumps({"role": role, "content": text})
-            loop.call_soon_threadsafe(lambda: channel.send(data))
-    except Exception as e:
-        print(f"Error sending text to client: {e}")
-
-
-
 class Memory:
     def __init__(self):
         from agno.memory.v2.memory import Memory as AgnoMemory

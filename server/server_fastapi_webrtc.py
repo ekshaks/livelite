@@ -13,7 +13,13 @@ from .setup_tracks import pc_session_setup
 DEFAULT_CLIENT_HTML_PATH = Path(__file__).parent.parent / "client/client.html"
 
 class Server:
-    def __init__(self, run_session: Callable, client_html_path: Path = DEFAULT_CLIENT_HTML_PATH, config: Dict = None):
+    def __init__(
+        self,
+        run_session: Callable,
+        client_html_path: Path = DEFAULT_CLIENT_HTML_PATH,
+        config: Dict = None,
+        app_assets_dir: Path = None,
+    ):
         """Initialize the WebRTC server with a session runner.
         
         Args:
@@ -29,6 +35,7 @@ class Server:
         self.app = FastAPI()
         self.client_dir = client_html_path.parent
         self.config = config
+        self.app_assets_dir = self._resolve_app_assets_dir(app_assets_dir)
         
         # Configure CORS
         self.app.add_middleware(
@@ -41,6 +48,15 @@ class Server:
         
         # Setup routes
         self._setup_routes()
+
+    @staticmethod
+    def _resolve_app_assets_dir(app_assets_dir):
+        if app_assets_dir is None:
+            return None
+        path = Path(app_assets_dir).resolve()
+        if not path.is_dir():
+            raise ValueError(f"App assets directory does not exist: {path}")
+        return path
         
     def _setup_routes(self):
         """Set up the FastAPI routes."""
@@ -48,6 +64,17 @@ class Server:
         
         # API routes
         self.app.post("/offer")(self.offer_handler)
+
+        @self.app.get("/client-config")
+        async def client_config():
+            return JSONResponse(self.config.get("client_config", {}))
+
+        if self.app_assets_dir is not None:
+            self.app.mount(
+                "/app-assets",
+                StaticFiles(directory=self.app_assets_dir),
+                name="app_assets",
+            )
         
         # Static files and catch-all route for SPA
         @self.app.get("/{full_path:path}")

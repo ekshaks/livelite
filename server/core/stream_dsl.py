@@ -1,11 +1,17 @@
 import asyncio
 import json
+import time
+import wave
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
+import numpy as np
+import reactivex
 from reactivex import operators as ops
-from reactivex.disposable import CompositeDisposable, Disposable
+from reactivex.disposable import CompositeDisposable
 
+from .events import TranscriptEvent
 from .logging_utils import monitor_log
 
 
@@ -45,10 +51,9 @@ class SubGroup:
 class Stream:
     """Small wrapper that adds `|` and `.to(...)` on top of an RxPY observable."""
 
-    def __init__(self, observable, name: Optional[str] = None, on_subscribe: Optional[Callable[[], Any]] = None):
+    def __init__(self, observable, name: Optional[str] = None):
         self.observable = observable
         self.name = name
-        self._on_subscribe = on_subscribe
 
     @classmethod
     def source(cls, observable, name: Optional[str] = None):
@@ -58,12 +63,8 @@ class Stream:
         return stage(self)
 
     def to(self, sink, name: Optional[str] = None, subs: Optional[SubGroup] = None) -> Sub:
-        # `.to(...)` is the materialization boundary: upstream wiring starts here.
-        upstream_disposable = self._on_subscribe() if self._on_subscribe else None
         sink_disposable = sink(self.observable)
         disposable = CompositeDisposable()
-        if upstream_disposable is not None:
-            disposable.add(upstream_disposable)
         if sink_disposable is not None:
             disposable.add(sink_disposable)
         sub = Sub(disposable, name=name or self.name)
@@ -75,7 +76,6 @@ class Stream:
         return Stream(
             self.observable.pipe(*pipe_ops),
             name=name,
-            on_subscribe=self._on_subscribe,
         )
 
     def latest(self, name: Optional[str] = None, subs: Optional[SubGroup] = None):
@@ -122,39 +122,84 @@ def turn_detector(name: str = "turn_detector", **kwargs):
     def apply(stream: Stream):
         from .turndet import turn_detector_vad
 
-        turn_input, segments, signals = turn_detector_vad(**kwargs)
-        upstream_sub = None
-
-        def ensure_connected():
-            # Connect audio to VAD once, even if both segments and signals are consumed.
-            nonlocal upstream_sub
-            if upstream_sub is None:
-                upstream_sub = stream.observable.subscribe(turn_input)
-            return upstream_sub
+        events = turn_detector_vad(stream.observable, **kwargs).pipe(ops.share())
 
         return MultiOutput(
-            segments=Stream(segments, name=f"{name}.segments", on_subscribe=ensure_connected),
-            signals=Stream(signals, name=f"{name}.signals", on_subscribe=ensure_connected),
+            segments=Stream(
+                events.pipe(
+                    ops.filter(lambda event: event.segment is not None),
+                    ops.map(lambda event: event.segment),
+                ),
+                name=f"{name}.segments",
+            ),
+            signals=Stream(
+                events.pipe(
+                    ops.filter(lambda event: event.signal is not None),
+                    ops.map(lambda event: event.signal),
+                ),
+                name=f"{name}.signals",
+            ),
         )
 
     return apply
 
 
-def whisper_stt(name: str = "whisper_stt", model_size: str = "tiny", mode: str = "mlx", **kwargs):
+def _dump_stt_audio(segment, directory: str, rate: int = 16000) -> Path:
+    output_dir = Path(directory)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    path = output_dir / f"stt-{time.time_ns()}.wav"
+    samples = np.asarray(segment)
+    if samples.dtype != np.int16:
+        samples = np.clip(samples, -1.0, 1.0)
+        samples = (samples * 32767).astype(np.int16)
+    with wave.open(str(path), "wb") as wav:
+        wav.setnchannels(1)
+        wav.setsampwidth(2)
+        wav.setframerate(rate)
+        wav.writeframes(samples.reshape(-1).tobytes())
+    print(f"[stt-debug] wrote {path} samples={samples.size}")
+    return path
+
+
+def whisper_stt(
+    name: str = "whisper_stt",
+    model_size: str = "tiny",
+    mode: str = "mlx",
+    debug_audio_dir: Optional[str] = None,
+    **kwargs,
+):
     """Create an STT stage. Use `model_size="medium"` for better letter recognition."""
 
     if mode == "mlx":
         from .stt_mlx import MlxPinnedWhisper
 
         mlx_stt = MlxPinnedWhisper(model_size=model_size, **kwargs)
-        return async_map_stage(mlx_stt.transcribe, name=name, on_dispose=mlx_stt.shutdown)
+
+        async def transcribe(segment):
+            if debug_audio_dir:
+                _dump_stt_audio(segment, debug_audio_dir)
+            text = await mlx_stt.transcribe(segment)
+            return TranscriptEvent(text=text or "", is_final=True)
+
+        return async_map_stage(transcribe, name=name, on_dispose=mlx_stt.shutdown)
 
     from .stt import WhisperSTT
 
     stt = WhisperSTT(mode=mode, model_size=model_size, **kwargs)
 
     def apply(stream: Stream):
-        return stream.pipe(ops.map(lambda segment: stt(segment)), name=name)
+        def transcribe(segment):
+            if debug_audio_dir:
+                _dump_stt_audio(segment, debug_audio_dir)
+            return TranscriptEvent(
+                text=stt(segment) or "",
+                is_final=True,
+            )
+
+        return stream.pipe(
+            ops.map(transcribe),
+            name=name,
+        )
 
     return apply
 
@@ -186,72 +231,94 @@ def map_items(mapper: Callable[[Any], Any], name: str = "map_items"):
     return apply
 
 
-def async_map_stage(func, name: str = "async_stage", concurrency: str = "serial", on_dispose: Optional[Callable[[], None]] = None):
-    """Serial async transform stage. Other concurrency policies are future work."""
-
-    if concurrency != "serial":
-        raise NotImplementedError("Only serial async stages are implemented in the MVP")
+def map_filter_items(
+    map_fn: Callable[[Any], Any],
+    filter_fn: Callable[[Any], bool],
+    name: str = "map_filter_items",
+):
+    """Map each item, then keep mapped values that satisfy ``filter_fn``."""
 
     def apply(stream: Stream):
-        from reactivex.subject import Subject
+        return stream.pipe(
+            ops.map(map_fn),
+            ops.filter(filter_fn),
+            name=name,
+        )
 
-        subject = Subject()
-        task = None
-        upstream_sub = None
-        source_sub = None
+    return apply
 
-        async def worker(queue: asyncio.Queue):
-            # One worker keeps async transforms ordered for the MVP.
-            while True:
-                item = await queue.get()
-                if item is None:
-                    subject.on_completed()
-                    break
+
+def final_transcript_text(name: str = "final_transcript_text"):
+    """Select final, non-empty text from a TranscriptEvent stream."""
+
+    def apply(stream: Stream):
+        return stream.pipe(
+            ops.filter(lambda event: event.is_final),
+            ops.map(lambda event: event.text),
+            ops.filter(lambda text: bool(text and text.strip())),
+            name=name,
+        )
+
+    return apply
+
+
+def async_map_stage(func, name: str = "async_stage", concurrency: str = "serial", on_dispose: Optional[Callable[[], None]] = None):
+    """Create an RxPY stage that awaits one coroutine call per input item.
+
+    A normal Rx ``map`` is synchronous: mapping an item with an ``async``
+    function would emit a coroutine object rather than await it. This adapter
+    converts each coroutine call into an inner Observable with
+    ``defer``/``from_future`` and lets RxPY control how those inner operations
+    are flattened:
+
+    - ``serial`` processes inputs in order, one at a time.
+    - ``parallel`` allows operations to overlap.
+    - ``latest`` cancels stale work when a newer item arrives.
+    - ``drop`` ignores new items while one operation is active.
+
+    The current asyncio loop is captured when the stage is built. Inputs may
+    arrive from another thread (for example, the VAD timer), so coroutine work
+    is scheduled onto that loop safely. The output is shared so multiple sinks
+    reuse one async execution rather than invoking ``func`` once per sink.
+    Disposing the final subscription cancels active futures; ``on_dispose``
+    optionally releases provider resources such as a model executor.
+    """
+
+    supported = {"serial", "parallel", "latest", "drop"}
+    if concurrency not in supported:
+        raise ValueError(f"Unknown concurrency policy: {concurrency}")
+
+    def apply(stream: Stream):
+        loop = asyncio.get_running_loop()
+
+        def async_observable(item):
+            def future_factory(_scheduler=None):
+                coroutine = func(item)
                 try:
-                    result = await func(item)
-                    subject.on_next(result)
-                except Exception as exc:
-                    subject.on_error(exc)
+                    if asyncio.get_running_loop() is loop:
+                        future = loop.create_task(coroutine)
+                    else:
+                        future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+                except RuntimeError:
+                    future = asyncio.run_coroutine_threadsafe(coroutine, loop)
+                return reactivex.from_future(future)
 
-        def ensure_connected():
-            nonlocal task, upstream_sub, source_sub
-            if source_sub is not None:
-                def dispose_existing():
-                    if task is not None:
-                        task.cancel()
-                    if on_dispose is not None:
-                        on_dispose()
+            return reactivex.defer(future_factory)
 
-                disposable = CompositeDisposable()
-                if upstream_sub is not None:
-                    disposable.add(upstream_sub)
-                disposable.add(source_sub)
-                disposable.add(Disposable(dispose_existing))
-                return disposable
+        inner_streams = stream.observable.pipe(ops.map(async_observable))
+        if concurrency == "serial":
+            output = inner_streams.pipe(ops.merge(max_concurrent=1))
+        elif concurrency == "parallel":
+            output = inner_streams.pipe(ops.flat_map())
+        elif concurrency == "latest":
+            output = inner_streams.pipe(ops.switch_latest())
+        else:
+            output = inner_streams.pipe(ops.exclusive())
 
-            loop = asyncio.get_running_loop()
-            queue = asyncio.Queue()
-            task = loop.create_task(worker(queue))
-            upstream_sub = stream._on_subscribe() if stream._on_subscribe else None
+        if on_dispose is not None:
+            output = output.pipe(ops.finally_action(on_dispose))
 
-            source_sub = stream.observable.subscribe(
-                on_next=lambda item: queue.put_nowait(item),
-                on_error=subject.on_error,
-                on_completed=lambda: queue.put_nowait(None),
-            )
-            def dispose():
-                task.cancel()
-                if on_dispose is not None:
-                    on_dispose()
-
-            disposable = CompositeDisposable()
-            if upstream_sub is not None:
-                disposable.add(upstream_sub)
-            disposable.add(source_sub)
-            disposable.add(Disposable(dispose))
-            return disposable
-
-        return Stream(subject, name=name, on_subscribe=ensure_connected)
+        return Stream(output.pipe(ops.share()), name=name)
 
     return apply
 
@@ -262,21 +329,26 @@ def print_sink(prefix: str = ""):
     return attach
 
 
-def client_text_sink(data_channels: Dict[str, Any], loop, role: str, channel: str = "server_text"):
+def client_message_sink(data_channels: Dict[str, Any], loop, channel: str = "server_text"):
     def attach(observable):
-        def on_next(text):
+        def on_next(message):
             # Data channel sends must hop back to the WebRTC event loop.
-            monitor_log(f"sending {role} text to client chars={len(str(text))}")
+            message_type = type(message).__name__
+            monitor_log(f"sending {message_type} to client")
             try:
                 data_channel = data_channels.get(channel)
                 if data_channel and data_channel.readyState == "open":
-                    data = json.dumps({"role": role, "content": text})
+                    if not hasattr(message, "to_client_dict"):
+                        raise TypeError(
+                            f"{message_type} must implement to_client_dict()"
+                        )
+                    data = json.dumps(message.to_client_dict())
                     loop.call_soon_threadsafe(lambda: data_channel.send(data))
             except Exception as exc:
-                print(f"Error sending text to client: {exc}")
+                print(f"Error sending client message: {exc}")
 
         def on_error(error):
-            print(f"client_text_sink error: {error}")
+            print(f"client_message_sink error: {error}")
 
         return observable.subscribe(on_next=on_next, on_error=on_error)
 
