@@ -67,7 +67,8 @@ async def setup_video_track(pc, track: MediaStreamTrack, video_obs_input, stop_e
             
             # Log frame info occasionally
             if frame_count % input_video_sample_interval == 0:
-                print('sending frame')
+                if config.get("debug_video_frames", False):
+                    print("sending frame")
                 video_obs_input.on_next(frame)
                 
         except MediaStreamError:
@@ -91,12 +92,13 @@ def pc_session_setup(run_session, config):
     pc.assistant_audio_track = assistant_audio_track
     pc.addTrack(assistant_audio_track)
     main_loop = asyncio.get_running_loop()
-    audio_input, video_input = Subject(), Subject()
+    audio_input, video_input, client_input = Subject(), Subject(), Subject()
     session = SessionContext(
         pc=pc,
         data_channels=data_channels,
         audio_input=audio_input,
         video_input=video_input,
+        client_input=client_input,
         main_loop=main_loop,
     )
 
@@ -122,8 +124,11 @@ def pc_session_setup(run_session, config):
         @channel.on("message")
         def on_message(message):
             print("Message from client:", message)
-            response = json.dumps({"role": "assistant", "content": "Hello from Assistant!"})
-            data_channels[channel.label].send(response)
+            try:
+                payload = json.loads(message) if isinstance(message, str) else message
+                client_input.on_next(payload)
+            except (TypeError, json.JSONDecodeError) as exc:
+                print(f"Ignoring invalid client message: {exc}")
 
         update_ready()
     

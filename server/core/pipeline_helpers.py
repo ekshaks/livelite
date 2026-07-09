@@ -1,5 +1,6 @@
 from .logging_utils import log_text_block
-from .stream_dsl import client_text_sink
+from .events import ClientTranscriptMessage
+from .stream_dsl import client_message_sink, map_items
 from .stream_tts import KokoroTTSProvider, tts_sink
 
 
@@ -13,9 +14,13 @@ def add_text_sinks(stream, data_channels, loop, role, subs, log_title=None, max_
     title = log_title or ("ASSISTANT WRITTEN RESPONSE" if role == "assistant" else "USER MESSAGE")
     if role != "assistant":
         stream.to(_text_log_sink(title, max_chars=max_log_chars), name=f"log_{role}_text", subs=subs)
-    stream.to(
-        client_text_sink(data_channels, loop, role=role),
-        name=f"client_{role}_text",
+    client_messages = stream | map_items(
+        lambda text: ClientTranscriptMessage(role=role, content=str(text)),
+        name=f"{role}_client_message",
+    )
+    client_messages.to(
+        client_message_sink(data_channels, loop),
+        name=f"client_{role}_message",
         subs=subs,
     )
 
