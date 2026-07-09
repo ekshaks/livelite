@@ -1,11 +1,13 @@
 import numpy as np
-import json
-
-from .utils import rx_ops as ops, rx_Subject as Subject, rx_Observable, rx_interval
+import reactivex
+from reactivex import operators as ops
+from reactivex.disposable import CompositeDisposable, Disposable
 import time
 import torch
-from typing import Tuple, Callable, Any, Optional
-from functools import lru_cache
+import threading
+from dataclasses import dataclass
+from typing import Any, Callable, Optional, Tuple
+
 from .events import SpeechEvent
 
 # Singleton instances
@@ -23,70 +25,106 @@ def get_vad_model() -> Tuple[Any, Any]:
 
 
 
-def turn_detector_vad(silence_timeout: float = 1.0, poll_interval: float = 0.1, 
-    min_speech_duration_ms: int = 100, min_silence_duration_ms: int = 2000,
-    speech_pad_ms: int = 200, threshold: float = 0.4, RATE: int = 16000
-) -> Tuple[Subject, rx_Observable]:
-    """Voice Activity Detection using Silero VAD with singleton model loading."""
+@dataclass(frozen=True)
+class VadEmission:
+    segment: Optional[np.ndarray] = None
+    signal: Optional[SpeechEvent] = None
 
+
+def _build_is_speech(
+    threshold: float,
+    min_speech_duration_ms: int,
+    min_silence_duration_ms: int,
+    speech_pad_ms: int,
+    rate: int,
+) -> Callable[[np.ndarray], bool]:
     vad_model, utils = get_vad_model()
     get_speech_timestamps = utils[0]
-    
-    input_subject = Subject()
-    output_subject = Subject()
-    signal_subject = Subject()
-    
+
     def is_speech(samples: np.ndarray) -> bool:
         samples_fp32 = samples.astype(np.float32) / 32768.0
         speech_ts = get_speech_timestamps(
             samples_fp32,
             vad_model,
-            sampling_rate=RATE,
+            sampling_rate=rate,
             threshold=threshold,
             min_speech_duration_ms=min_speech_duration_ms,
             min_silence_duration_ms=min_silence_duration_ms,
-            speech_pad_ms=speech_pad_ms
+            speech_pad_ms=speech_pad_ms,
         )
         return len(speech_ts) > 0
-    
-    buffer = []
-    last_speech_time = [0]
-    
-    def process_chunk(chunk: np.ndarray):
-        #print('processing chunk..', chunk.shape)
-        if is_speech(chunk):
-            if not buffer:  # just started speaking
-                print("[interrupt] VAD SPEECH_START")
-                signal_subject.on_next(SpeechEvent.SPEECH_START)
-            buffer.append(chunk)
-            last_speech_time[0] = time.time()
-    
-    def check_silence(_):
-        #print('checking silence..')
-        if buffer and (time.time() - last_speech_time[0]) >= silence_timeout:
-            print("[interrupt] VAD SPEECH_END")
-            signal_subject.on_next(SpeechEvent.SPEECH_END)
-            print('silence detected')
-            try:
-                segment = np.concatenate(buffer, axis=0)
-                #print("check_silence: segment", segment.shape)
-                output_subject.on_next(segment)
-                buffer.clear()
-            except ValueError as e:
-                print(f"Error in segment concatenation: {e}")
-    
-    # input_subject.pipe(
-    #     ops.map(lambda chunk: np.asarray(chunk, dtype=np.int16).flatten()),
-    #     ops.filter(lambda x: len(x) > 0)
-    # )
-    input_subject.subscribe(
-        on_next=process_chunk,
-        on_error=lambda e: print(f"VAD processing error: {e}")
+
+    return is_speech
+
+
+def turn_detector_vad(
+    audio_observable,
+    silence_timeout: float = 1.0,
+    poll_interval: float = 0.1,
+    min_speech_duration_ms: int = 100, min_silence_duration_ms: int = 2000,
+    speech_pad_ms: int = 200, threshold: float = 0.4, RATE: int = 16000,
+    is_speech_fn: Optional[Callable[[np.ndarray], bool]] = None,
+):
+    """Return a cold VAD event observable with subscription-owned resources."""
+
+    is_speech = is_speech_fn or _build_is_speech(
+        threshold=threshold,
+        min_speech_duration_ms=min_speech_duration_ms,
+        min_silence_duration_ms=min_silence_duration_ms,
+        speech_pad_ms=speech_pad_ms,
+        rate=RATE,
     )
-    
-    rx_interval(poll_interval).subscribe(check_silence)
-    
-    return input_subject, output_subject, signal_subject
+
+    def subscribe(observer, scheduler=None):
+        buffer = []
+        last_speech_time = [0.0]
+        lock = threading.RLock()
+        disposed = threading.Event()
+
+        def process_chunk(chunk: np.ndarray):
+            if disposed.is_set():
+                return
+            with lock:
+                if is_speech(chunk):
+                    if not buffer:
+                        print("[interrupt] VAD SPEECH_START")
+                        observer.on_next(VadEmission(signal=SpeechEvent.SPEECH_START))
+                    buffer.append(chunk)
+                    last_speech_time[0] = time.monotonic()
+
+        def emit_segment_if_ready(force: bool = False):
+            if disposed.is_set():
+                return
+            with lock:
+                if not buffer:
+                    return
+                if not force and (time.monotonic() - last_speech_time[0]) < silence_timeout:
+                    return
+                print("[interrupt] VAD SPEECH_END")
+                observer.on_next(VadEmission(signal=SpeechEvent.SPEECH_END))
+                segment = np.concatenate(buffer, axis=0)
+                buffer.clear()
+                observer.on_next(VadEmission(segment=segment))
+
+        def on_completed():
+            emit_segment_if_ready(force=True)
+            observer.on_completed()
+
+        source_sub = audio_observable.subscribe(
+            on_next=process_chunk,
+            on_error=observer.on_error,
+            on_completed=on_completed,
+        )
+        timer_sub = reactivex.interval(poll_interval).subscribe(
+            lambda _: emit_segment_if_ready()
+        )
+
+        def dispose():
+            disposed.set()
+
+        return CompositeDisposable(source_sub, timer_sub, Disposable(dispose))
+
+    return reactivex.create(subscribe)
 
 
 def test():
@@ -94,7 +132,14 @@ def test():
     from mic import AudioGenerator
     from stt import WhisperSTT
     audio_gen = AudioGenerator()
-    turn_input, turn_output, turn_signal = turn_detector_vad()
+    from reactivex.subject import Subject
+
+    turn_input = Subject()
+    events = turn_detector_vad(turn_input)
+    turn_output = events.pipe(
+        ops.filter(lambda event: event.segment is not None),
+        ops.map(lambda event: event.segment),
+    )
     stt = WhisperSTT()
     
     def print_transcription(segment):

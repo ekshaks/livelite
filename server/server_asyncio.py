@@ -11,7 +11,13 @@ from .setup_tracks import pc_session_setup
 DEFAULT_CLIENT_HTML_PATH = Path(__file__).parent.parent / "client/client.html"
 
 class Server:
-    def __init__(self, run_session: Callable, client_html_path: Path = DEFAULT_CLIENT_HTML_PATH, config: Dict = {}):
+    def __init__(
+        self,
+        run_session: Callable,
+        client_html_path: Path = DEFAULT_CLIENT_HTML_PATH,
+        config: Dict = {},
+        app_assets_dir: Path = None,
+    ):
         """Initialize the WebRTC server with a session runner.
         
         Args:
@@ -21,16 +27,38 @@ class Server:
         self.run_session = run_session
         self.pcs: Set[RTCPeerConnection] = set()
         self.app = web.Application()
+        self.config = config
+        self.app_assets_dir = self._resolve_app_assets_dir(app_assets_dir)
         self._setup_routes(client_html_path)
         self.app.on_shutdown.append(self.on_shutdown)
 
-        self.config = config
+    @staticmethod
+    def _resolve_app_assets_dir(app_assets_dir):
+        if app_assets_dir is None:
+            return None
+        path = Path(app_assets_dir).resolve()
+        if not path.is_dir():
+            raise ValueError(f"App assets directory does not exist: {path}")
+        return path
 
     
     def _setup_routes(self, client_html_path):
         """Set up the web application routes."""
         print('setting up routes..')
         self.app.router.add_post("/offer", self.offer_handler)
+
+        async def client_config(request):
+            return web.json_response(self.config.get("client_config", {}))
+
+        self.app.router.add_get("/client-config", client_config)
+
+        if self.app_assets_dir is not None:
+            self.app.router.add_static(
+                "/app-assets/",
+                path=self.app_assets_dir,
+                name="app_assets",
+                follow_symlinks=False,
+            )
         
         client_dir = client_html_path.parent  # base directory containing index.html, js/, assets/, etc.
 
@@ -73,7 +101,7 @@ class Server:
             await pc.close()
             raise web.HTTPInternalServerError(text=str(e))
 
-    async def on_shutdown(self):
+    async def on_shutdown(self, app=None):
         """Handle application shutdown."""
         print("Shutting down...")
         # Close all peer connections

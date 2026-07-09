@@ -5,6 +5,7 @@ from .stream_dsl import (
     Stream,
     SubGroup,
     async_map_stage,
+    final_transcript_text,
     filter_items,
     map_items,
     turn_detector,
@@ -40,8 +41,8 @@ async def run_multimodal_session(
     latest_frame = video.latest(name="latest_frame", subs=subs)
 
     turn = audio | turn_detector()
-    user_text = turn.segments | whisper_stt(mode=stt_provider, model_size=stt_model_size)
-    user_text = user_text | filter_items(lambda text: bool(text and text.strip()), name="non_empty_user_text")
+    transcripts = turn.segments | whisper_stt(mode=stt_provider, model_size=stt_model_size)
+    user_text = transcripts | final_transcript_text()
 
     agent = create_agent(llm_model, prompts_path=prompts_path, prompt_id=prompt_id, name=agent_name)
 

@@ -26,6 +26,8 @@ def load_mlx_model(model_id):
 
 
 def get_mlx_whisper_model(model_size: str = "base", model_id=None):
+    if model_size == "turbo":
+        model_id = "mlx-community/whisper-large-v3-turbo"
     model_id = model_id or f"mlx-community/whisper-{model_size}-mlx"
     return load_mlx_model(model_id)
 

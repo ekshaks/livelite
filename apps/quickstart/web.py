@@ -5,6 +5,7 @@ from server.core.pipeline_helpers import add_kokoro_tts, add_text_sinks
 from server.core.stream_dsl import (
     Stream,
     SubGroup,
+    final_transcript_text,
     turn_detector,
     whisper_stt,
 )
@@ -21,7 +22,8 @@ async def run_session(session, tts_mode=None, model_size="tiny"):
 
     audio = Stream.source(session.audio_input, name="audio")
     turn = audio | turn_detector()
-    user_text = turn.segments | whisper_stt(mode="mlx", model_size=model_size)
+    transcripts = turn.segments | whisper_stt(mode="mlx", model_size=model_size)
+    user_text = transcripts | final_transcript_text()
 
     add_text_sinks(user_text, session.data_channels, session.main_loop, role="user", subs=subs)
     add_kokoro_tts(user_text, session.pc, turn.signals, subs=subs, mode=tts_mode)

@@ -37,7 +37,7 @@ Kokoro-FastAPI/ Local Kokoro TTS server
 |-----|--------|-------------|
 | `apps/multimodal_agent.py` | ✅ Runnable | Audio + video → VLM agent → TTS with interruption |
 | `apps/basic_pipeline.py` | ⚠️ Needs refactor | Audio-only → LLM → text back to browser |
-| `apps/spell.py` | 🚧 Scaffold | Spelling tutor game concept |
+| `apps/spell/app.py` | ✅ Runnable | Camera spelling game with VLM handwriting transcription |
 | `apps/v2v.py` | 🚧 Scaffold | Voice-to-voice variant of spelling tutor |
 
 ## Core pipeline

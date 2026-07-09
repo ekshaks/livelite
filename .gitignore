@@ -3,6 +3,19 @@ __pycache__/
 *.py[codz]
 *$py.class
 
+# local stuff
+misc/
+Kokoro-FastAPI/
+smart-turn/
+data/
+debug-ocr/
+server/certs/
+*.onnx
+*.bin
+*.pt
+.DS_Store
+
+
 # C extensions
 *.so
 
