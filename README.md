@@ -7,11 +7,11 @@ Real-time voice/video agent framework over WebRTC. Browser streams audio and vid
 ```bash
 pip install -r requirements.txt
 
-# Run the multimodal agent (primary app)
-python -m apps.multimodal_agent
+# Run the multimodal agent quickstart
+python -m apps.quickstart.multimodal_agent
 
 # Or with auto-reload on file changes
-watchfiles --filter python "python -m apps.multimodal_agent"
+watchfiles --filter python "python -m apps.quickstart.multimodal_agent"
 ```
 
 Open `https://localhost:9000` (HTTPS required for camera/mic access). Click **Start Streaming** and speak. The agent responds in text and via local speakers.
@@ -21,24 +21,20 @@ Open `https://localhost:9000` (HTTPS required for camera/mic access). Click **St
 ## Folder structure
 
 ```
-apps/           Agent pipelines (runnable apps)
-client/         Browser-side WebRTC client (HTML + JS)
+apps/           Runnable app entrypoints and examples
+client/         Browser-side WebRTC client shell
 server/         WebRTC server + core processing modules
-  core/         VAD, STT, TTS, LLM utils, audio/video utils
-docs/           Architecture reference and task backlog
-data/           Sample audio files for testing
-models/         Local model files
-Kokoro-FastAPI/ Local Kokoro TTS server
+  core/         Streams, VAD, STT, TTS, LLM/VLM, session helpers
+tests/          Unit tests for streams, controllers, and app logic
 ```
 
 ## Apps
 
 | App | Status | Description |
 |-----|--------|-------------|
-| `apps/multimodal_agent.py` | ✅ Runnable | Audio + video → VLM agent → TTS with interruption |
-| `apps/basic_pipeline.py` | ⚠️ Needs refactor | Audio-only → LLM → text back to browser |
-| `apps/spell/app.py` | ✅ Runnable | Camera spelling game with VLM handwriting transcription |
-| `apps/v2v.py` | 🚧 Scaffold | Voice-to-voice variant of spelling tutor |
+| `apps/quickstart/multimodal_agent.py` | ✅ Runnable | Minimal audio/video agent: browser mic/camera → STT/VLM → text + TTS response |
+| `apps/quickstart/mic.py` | ✅ Runnable | Audio-only quickstart for mic → STT/agent response |
+| `apps/quickstart/web.py` | ✅ Runnable | WebRTC quickstart entrypoint using the shared server/session stack |
 
 ## Core pipeline
 
@@ -57,13 +53,13 @@ client (data channel)        ← text rendered in browser
 core/tts.py                  ← Kokoro TTS → local speakers
 ```
 
+## Building interactive games
+
+Mulive apps can be written as stateful controllers instead of free-form agents. Voice transcripts, browser UI events, and model/tool results are converted into typed events, then sent through one controller mailbox. The controller owns game state and emits structured outputs for transcript text, TTS, client UI feedback, and async side effects such as OCR or VLM calls.
+
+Use deterministic controller logic for scoring and state transitions. Use LLM/VLM calls only for flexible perception or language tasks, then convert results back into typed events.
+
 ## TTS backends
 
 - **Kokoro** (default) — local ONNX model via OpenAI-compatible API (`localhost:8880`). Start with `Kokoro-FastAPI/`.
 - **Gemini TTS** — cloud, via `google-genai`.
-
-## Docs
-
-- [Architecture reference](docs/architecture.md) — component design, data flow, implementation notes
-- [Open problems](docs/private/open_problems.md) — known runtime and product gaps
-- [Test plan](docs/private/test_plan.md) — application verification strategy
