@@ -62,6 +62,14 @@ export const TrackManager = {
     await this.pc.setRemoteDescription(answer);
   },
 
+  sendData(message) {
+    if (!this.dataChannel || this.dataChannel.readyState !== "open") {
+      return false;
+    }
+    this.dataChannel.send(JSON.stringify(message));
+    return true;
+  },
+
   async getUserMedia(constraints) {
     if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
       throw new Error(
