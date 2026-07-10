@@ -1,7 +1,7 @@
 from .logging_utils import log_text_block
 from .events import ClientTranscriptMessage
 from .stream_dsl import client_message_sink, map_items
-from .stream_tts import KokoroTTSProvider, tts_sink
+from .tts_providers import KokoroFastApiTTSProvider, tts_sink
 
 
 def _text_log_sink(title, max_chars=1600):
@@ -30,12 +30,12 @@ def add_kokoro_tts(stream, pc, turn_signals, subs, mode, name_prefix="kokoro"):
         return
 
     if mode == "local":
-        provider = KokoroTTSProvider(mode="local")
+        provider = KokoroFastApiTTSProvider(mode="local")
     elif mode == "browser":
         audio_track = getattr(pc, "assistant_audio_track", None)
         if audio_track is None:
             raise RuntimeError("Browser TTS requested, but pc.assistant_audio_track is not available")
-        provider = KokoroTTSProvider(mode="webrtc", audio_track=audio_track)
+        provider = KokoroFastApiTTSProvider(mode="webrtc", audio_track=audio_track)
     else:
         raise ValueError(f"Unknown TTS mode: {mode}")
 

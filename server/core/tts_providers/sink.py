@@ -12,7 +12,7 @@ class TTSProvider(Protocol):
 
 
 class PlaybackState:
-    """Thread-safe state exposed by TTS while local playback is active."""
+    """Thread-safe state exposed by TTS while playback is active."""
 
     def __init__(self):
         self._playing = threading.Event()
@@ -29,9 +29,7 @@ class PlaybackState:
         return self._playing.is_set()
 
     def is_playing_or_recent(self, cooldown_seconds: float) -> bool:
-        if self.is_playing():
-            return True
-        return (time.monotonic() - self._last_stopped_at) < cooldown_seconds
+        return self.is_playing() or (time.monotonic() - self._last_stopped_at) < cooldown_seconds
 
 
 def _as_observable(stream_or_observable: Any):
@@ -53,11 +51,7 @@ def tts_sink(
     clear_queue_on_interrupt: bool = True,
     state: Optional[PlaybackState] = None,
 ):
-    """Reusable TTS sink for `.to(...)`.
-
-    Providers implement only `speak(text, interrupt_event)`.
-    This function owns RxPY subscription, queueing, interrupts, and disposal.
-    """
+    """Reusable sink: queue text, handle interruption, call provider.speak()."""
 
     def attach(text_observable):
         queue = asyncio.Queue()
@@ -115,33 +109,3 @@ def tts_sink(
 
     return attach
 
-
-class KokoroTTSProvider:
-    def __init__(self, mode: str = "local", audio_track: Optional[Any] = None):
-        self.mode = mode
-        self.audio_track = audio_track
-
-    async def speak(self, text: str, interrupt_event: asyncio.Event) -> None:
-        if self.mode == "local":
-            from .tts import tts_kokoro_stream_async
-
-            await tts_kokoro_stream_async(text, interrupt_event)
-            return
-
-        if self.mode == "webrtc":
-            from .tts import tts_kokoro_to_track_async
-
-            if self.audio_track is None:
-                raise ValueError("audio_track is required for KokoroTTSProvider(mode='webrtc')")
-            await tts_kokoro_to_track_async(text, interrupt_event, self.audio_track)
-            return
-
-        raise ValueError(f"Unknown Kokoro TTS mode: {self.mode}")
-
-    def clear_output(self) -> None:
-        if self.mode == "webrtc" and self.audio_track is not None and hasattr(self.audio_track, "clear"):
-            self.audio_track.clear()
-
-
-def kokoro_tts_sink(interrupts: Optional[Any] = None, name: str = "kokoro_tts"):
-    return tts_sink(KokoroTTSProvider(), interrupts=interrupts, name=name)
