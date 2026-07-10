@@ -14,7 +14,7 @@ from server.core.stream_dsl import (
     turn_detector,
     whisper_stt,
 )
-from server.core.stream_tts import KokoroTTSProvider, PlaybackState, tts_sink
+from server.core.tts_providers import KokoroFastApiTTSProvider, PlaybackState, tts_sink
 
 
 async def run_mic_pipeline(args):
@@ -40,7 +40,7 @@ async def run_mic_pipeline(args):
     if args.tts:
         user_text.to(
             tts_sink(
-                KokoroTTSProvider(),
+                KokoroFastApiTTSProvider(),
                 interrupts=turn.signals,
                 name="kokoro_tts",
                 state=playback_state,
