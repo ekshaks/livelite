@@ -8,6 +8,22 @@
   <link rel="stylesheet" href="/css/session.css">
 </head>
 <body>
+  <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute">
+    <symbol id="icon-mic-on" viewBox="0 0 24 24">
+      <path d="M12 2a3 3 0 00-3 3v6a3 3 0 006 0V5a3 3 0 00-3-3z"/>
+      <path d="M5 10v1a7 7 0 0014 0v-1M12 18v4M8 22h8"/>
+    </symbol>
+    <symbol id="icon-mic-off" viewBox="0 0 24 24">
+      <path d="M12 2a3 3 0 00-3 3v6a3 3 0 004.1 2.8M15 9V5a3 3 0 00-5.3-1.9M5 10v1a7 7 0 0011.9 5M19 10v1a7 7 0 01-.5 2.6M12 18v4M8 22h8M3 3l18 18"/>
+    </symbol>
+    <symbol id="icon-camera-on" viewBox="0 0 24 24">
+      <path d="M15 10l4.6-2.7a.9.9 0 011.4.8v7.8a.9.9 0 01-1.4.8L15 14"/>
+      <path d="M4 6h9a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2z"/>
+    </symbol>
+    <symbol id="icon-camera-off" viewBox="0 0 24 24">
+      <path d="M15 10l4.6-2.7a.9.9 0 011.4.8v7.8a.9.9 0 01-1.4.8L15 14M4 6h9a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2zM3 3l18 18"/>
+    </symbol>
+  </svg>
   <main class="app-shell">
     <header class="app-header">
       <h1 id="appName" class="brand">Mulive</h1>
@@ -56,14 +72,14 @@
 
     <nav class="control-dock" aria-label="Session controls">
       <button id="muteAudioBtn" class="control-btn" type="button" aria-pressed="false" aria-label="Turn microphone on">
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M12 2a3 3 0 00-3 3v6a3 3 0 004.1 2.8M15 9V5a3 3 0 00-5.3-1.9M5 10v1a7 7 0 0011.9 5M19 10v1a7 7 0 01-.5 2.6M12 18v4M8 22h8M3 3l18 18"/>
+        <svg class="control-icon" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+          <use href="#icon-mic-off"></use>
         </svg>
         <span class="btn-text">Mic off</span>
       </button>
       <button id="stopVideoBtn" class="control-btn" type="button" aria-pressed="false" aria-label="Turn camera on">
-        <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-          <path d="M15 10l4.6-2.7a.9.9 0 011.4.8v7.8a.9.9 0 01-1.4.8L15 14M4 6h9a2 2 0 012 2v8a2 2 0 01-2 2H4a2 2 0 01-2-2V8a2 2 0 012-2zM3 3l18 18"/>
+        <svg class="control-icon" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+          <use href="#icon-camera-off"></use>
         </svg>
         <span class="btn-text">Camera off</span>
       </button>
