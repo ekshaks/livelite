@@ -10,6 +10,7 @@ smart-turn/
 data/
 debug-ocr/
 server/certs/
+muapps/
 *.onnx
 *.bin
 *.pt

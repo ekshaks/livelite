@@ -166,6 +166,8 @@ def whisper_stt(
     model_size: str = "tiny",
     mode: str = "mlx",
     debug_audio_dir: Optional[str] = None,
+    timeout_s: float = 20.0,
+    on_status: Optional[Callable[[str, dict], None]] = None,
     **kwargs,
 ):
     """Create an STT stage. Use `model_size="medium"` for better letter recognition."""
@@ -178,7 +180,32 @@ def whisper_stt(
         async def transcribe(segment):
             if debug_audio_dir:
                 _dump_stt_audio(segment, debug_audio_dir)
-            text = await mlx_stt.transcribe(segment)
+            if on_status and mlx_stt.is_loading():
+                on_status("loading", {"model_size": model_size})
+            try:
+                text = await asyncio.wait_for(
+                    mlx_stt.transcribe(segment),
+                    timeout=timeout_s,
+                )
+            except asyncio.TimeoutError:
+                if on_status:
+                    on_status(
+                        "error",
+                        {
+                            "model_size": model_size,
+                            "reason": f"STT timed out after {timeout_s:g}s",
+                        },
+                    )
+                return TranscriptEvent(text="", is_final=True)
+            except Exception as exc:
+                if on_status:
+                    on_status(
+                        "error",
+                        {"model_size": model_size, "reason": str(exc)},
+                    )
+                return TranscriptEvent(text="", is_final=True)
+            if on_status:
+                on_status("ready", {"model_size": model_size})
             return TranscriptEvent(text=text or "", is_final=True)
 
         return async_map_stage(transcribe, name=name, on_dispose=mlx_stt.shutdown)

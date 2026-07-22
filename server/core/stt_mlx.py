@@ -66,6 +66,16 @@ class MlxPinnedWhisper:
         self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx-whisper")
         _log(f"[mlx-stt] creating pinned worker from thread={threading.get_ident()}")
         self._stt_future = self.executor.submit(self._load)
+        self._stt_future.add_done_callback(self._log_load_result)
+
+    def _log_load_result(self, future):
+        if not DEBUG_MLX_STT:
+            return
+        if future.cancelled():
+            _log("[mlx-stt] load future done cancelled=True")
+            return
+        exc = future.exception()
+        _log(f"[mlx-stt] load future done cancelled=False exc={exc!r}")
 
     def _load(self):
         from .stt import WhisperSTT
@@ -83,10 +93,16 @@ class MlxPinnedWhisper:
         _log(f"[mlx-stt] worker infer done text_len={len(result or '')}")
         return result
 
+    def is_loading(self) -> bool:
+        return not self._stt_future.done()
+
     async def transcribe(self, segment):
         _log(f"[mlx-stt] enqueue transcribe segment_shape={getattr(segment, 'shape', None)}")
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self.executor, self._infer, segment)
+        _log("[mlx-stt] before run_in_executor")
+        future = loop.run_in_executor(self.executor, self._infer, segment)
+        _log("[mlx-stt] after run_in_executor")
+        return await future
 
     def shutdown(self):
         self.executor.shutdown(wait=False, cancel_futures=True)

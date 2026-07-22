@@ -1,8 +1,11 @@
-function setControl(button, { pressed, text, label, state = "" }) {
+function setControl(button, { pressed, text, label, state = "", icon }) {
   button.setAttribute("aria-pressed", String(pressed));
   button.setAttribute("aria-label", label);
   button.querySelector(".btn-text").textContent = text;
   button.dataset.state = state;
+  if (icon) {
+    button.querySelector(".control-icon use")?.setAttribute("href", `#${icon}`);
+  }
 }
 
 function permissionMessage(kind, error) {
@@ -47,6 +50,7 @@ export function createMediaControls({ trackManager, elements, onStatus }) {
       text: state.videoOn ? "Stopping…" : "Starting…",
       label: state.videoOn ? "Stopping camera" : "Starting camera",
       state: "connecting",
+      icon: state.videoOn ? "icon-camera-on" : "icon-camera-off",
     });
     videoState.textContent = state.videoOn ? "Stopping camera…" : "Requesting camera…";
 
@@ -62,8 +66,8 @@ export function createMediaControls({ trackManager, elements, onStatus }) {
       videoPanel.dataset.video = state.videoOn ? "on" : "off";
       videoState.textContent = state.videoOn ? "Video on" : "Video off";
       setControl(videoButton, state.videoOn
-        ? { pressed: true, text: "Camera on", label: "Turn camera off" }
-        : { pressed: false, text: "Camera off", label: "Turn camera on" });
+        ? { pressed: true, text: "Camera on", label: "Turn camera off", icon: "icon-camera-on" }
+        : { pressed: false, text: "Camera off", label: "Turn camera on", icon: "icon-camera-off" });
     } catch (error) {
       console.error("Video toggle error", error);
       const message = permissionMessage("Camera", error);
@@ -74,6 +78,7 @@ export function createMediaControls({ trackManager, elements, onStatus }) {
         text: "Camera blocked",
         label: `${message}. Try camera again`,
         state: "denied",
+        icon: "icon-camera-off",
       });
     } finally {
       videoButton.disabled = false;
@@ -87,6 +92,7 @@ export function createMediaControls({ trackManager, elements, onStatus }) {
       text: state.audioEnabled ? "Muting…" : "Starting…",
       label: state.audioEnabled ? "Muting microphone" : "Starting microphone",
       state: "connecting",
+      icon: state.audioEnabled ? "icon-mic-on" : "icon-mic-off",
     });
 
     try {
@@ -103,8 +109,8 @@ export function createMediaControls({ trackManager, elements, onStatus }) {
       }
 
       setControl(audioButton, state.audioEnabled
-        ? { pressed: true, text: "Mic on", label: "Mute microphone" }
-        : { pressed: false, text: "Mic off", label: "Turn microphone on" });
+        ? { pressed: true, text: "Mic on", label: "Mute microphone", icon: "icon-mic-on" }
+        : { pressed: false, text: "Mic off", label: "Turn microphone on", icon: "icon-mic-off" });
     } catch (error) {
       console.error("Audio toggle failed", error);
       const message = permissionMessage("Microphone", error);
@@ -114,6 +120,7 @@ export function createMediaControls({ trackManager, elements, onStatus }) {
         text: "Mic blocked",
         label: `${message}. Try microphone again`,
         state: "denied",
+        icon: "icon-mic-off",
       });
     } finally {
       audioButton.disabled = false;
