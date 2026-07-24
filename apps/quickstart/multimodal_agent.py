@@ -18,13 +18,16 @@ async def run_session(
     mode="av",
     tts_mode=None,
     stt_model_size="tiny",
+    stt_provider="mlx",
+    stt_model=None,
     llm_model="groq:meta-llama/llama-4-scout-17b-16e-instruct",
 ):
     await run_multimodal_session(
         session,
         mode=mode,
-        stt_provider="mlx",
+        stt_provider=stt_provider,
         stt_model_size=stt_model_size,
+        stt_model=stt_model,
         llm_model=llm_model,
         prompts_path=PROMPTS_FILE,
         prompt_id="visual_solver",
@@ -38,6 +41,8 @@ def parse_args():
     parser = argparse.ArgumentParser(description="Run the multimodal DSL WebRTC pipeline.")
     parser.add_argument("--mode", choices=["a", "av"], default="av")
     parser.add_argument("--stt-model-size", default="tiny")
+    parser.add_argument("--stt-provider", default="mlx")
+    parser.add_argument("--stt-model")
     parser.add_argument("--llm-model", default="groq:meta-llama/llama-4-scout-17b-16e-instruct")
     group = parser.add_mutually_exclusive_group()
     group.add_argument("--tts-local", action="store_true", help="Play Kokoro TTS on the server speaker.")
@@ -68,6 +73,8 @@ if __name__ == "__main__":
             mode=args.mode,
             tts_mode=tts_mode,
             stt_model_size=args.stt_model_size,
+            stt_provider=args.stt_provider,
+            stt_model=args.stt_model,
             llm_model=args.llm_model,
         ),
         config=config,

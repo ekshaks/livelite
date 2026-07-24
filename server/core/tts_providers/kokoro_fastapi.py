@@ -2,6 +2,8 @@ import asyncio
 import time
 from typing import Any, Optional
 
+KOKORO_PCM_SAMPLE_RATE = 24000
+
 
 def _print_tts_metrics(timings, chunk_count):
     if timings["first_buffer_received"] is None:
@@ -26,7 +28,7 @@ async def _tts_kokoro_stream_chunks(text, interrupt_event, on_audio_block):
     import numpy as np
 
     timings = {"start": time.perf_counter(), "first_buffer_received": None, "end": None}
-    samplerate = 22050
+    samplerate = KOKORO_PCM_SAMPLE_RATE
     blocksize = 1024
     chunk_count = 0
 
@@ -61,7 +63,11 @@ async def tts_kokoro_stream_async(text, interrupt_event):
     """Stream Kokoro-FastAPI TTS to the local speaker."""
     import sounddevice as sd
 
-    stream = sd.OutputStream(samplerate=22050, channels=1, dtype="int16")
+    stream = sd.OutputStream(
+        samplerate=KOKORO_PCM_SAMPLE_RATE,
+        channels=1,
+        dtype="int16",
+    )
     stream.start()
 
     async def write_local(audio_block, samplerate):
@@ -128,4 +134,3 @@ class KokoroFastApiTTSProvider:
     def clear_output(self) -> None:
         if self.mode == "webrtc" and self.audio_track is not None and hasattr(self.audio_track, "clear"):
             self.audio_track.clear()
-

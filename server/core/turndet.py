@@ -130,7 +130,7 @@ def turn_detector_vad(
 def test():
     """Example usage with proper resource cleanup."""
     from mic import AudioGenerator
-    from stt import WhisperSTT
+    from .stt.whisper import WhisperSTT
     audio_gen = AudioGenerator()
     from reactivex.subject import Subject
 

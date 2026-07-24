@@ -7,11 +7,11 @@ from server.core.stream_dsl import (
     SubGroup,
     final_transcript_text,
     turn_detector,
-    whisper_stt,
+    stt,
 )
 
 
-async def run_session(session, tts_mode=None, model_size="tiny"):
+async def run_session(session, tts_mode=None, stt_provider="mlx", stt_model=None, model_size="tiny"):
     """
     DSL version of the basic pipeline.
 
@@ -22,7 +22,11 @@ async def run_session(session, tts_mode=None, model_size="tiny"):
 
     audio = Stream.source(session.audio_input, name="audio")
     turn = audio | turn_detector()
-    transcripts = turn.segments | whisper_stt(mode="mlx", model_size=model_size)
+    transcripts = turn.segments | stt(
+        provider=stt_provider,
+        model=stt_model,
+        model_size=model_size,
+    )
     user_text = transcripts | final_transcript_text()
 
     add_text_sinks(user_text, session.data_channels, session.main_loop, role="user", subs=subs)
@@ -43,6 +47,8 @@ def parse_args():
     tls_group.add_argument("--https", action="store_true", default=True, help="Serve HTTPS with local certs. Default.")
     tls_group.add_argument("--http", action="store_true", help="Serve plain HTTP.")
     parser.add_argument("--model-size", default="tiny")
+    parser.add_argument("--stt-provider", default="mlx")
+    parser.add_argument("--stt-model")
     return parser.parse_args()
 
 
@@ -58,6 +64,8 @@ if __name__ == "__main__":
         run_session=lambda session: run_session(
             session,
             tts_mode=tts_mode,
+            stt_provider=args.stt_provider,
+            stt_model=args.stt_model,
             model_size=args.model_size,
         ),
         config=config,

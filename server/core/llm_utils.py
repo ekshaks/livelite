@@ -1,6 +1,7 @@
 import base64
 import asyncio
 import io
+import time
 
 import yaml
 from PIL import Image as PILImage
@@ -125,9 +126,12 @@ async def call_groq_chat(
     from groq import AsyncGroq
 
     client = AsyncGroq()
+    model = groq_model_id(model_id)
+    started_at = time.perf_counter()
+    monitor_log(f"llm request start provider=groq operation=chat model={model}")
     try:
         completion = await client.chat.completions.create(
-            model=groq_model_id(model_id),
+            model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
@@ -138,8 +142,18 @@ async def call_groq_chat(
             reasoning_effort=groq_reasoning_effort(model_id, reasoning_effort),
         )
     except Exception as exc:
+        elapsed_s = time.perf_counter() - started_at
+        monitor_log(
+            "llm request failed "
+            f"provider=groq operation=chat model={model} elapsed_s={elapsed_s:.3f} "
+            f"error={type(exc).__name__}"
+        )
         log_groq_error(exc)
         raise
+    elapsed_s = time.perf_counter() - started_at
+    monitor_log(
+        f"llm request done provider=groq operation=chat model={model} elapsed_s={elapsed_s:.3f}"
+    )
     content = completion.choices[0].message.content or ""
     log_text_block("RAW GROQ RESPONSE", content, max_chars=10000)
     return content
@@ -162,9 +176,12 @@ async def call_groq_vision(
     from groq import AsyncGroq
 
     client = AsyncGroq()
+    model = groq_model_id(model_id)
+    started_at = time.perf_counter()
+    monitor_log(f"llm request start provider=groq operation=vision model={model}")
     try:
         completion = await client.chat.completions.create(
-            model=groq_model_id(model_id),
+            model=model,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {
@@ -184,8 +201,18 @@ async def call_groq_vision(
             reasoning_effort=groq_reasoning_effort(model_id, reasoning_effort),
         )
     except Exception as exc:
+        elapsed_s = time.perf_counter() - started_at
+        monitor_log(
+            "llm request failed "
+            f"provider=groq operation=vision model={model} elapsed_s={elapsed_s:.3f} "
+            f"error={type(exc).__name__}"
+        )
         log_groq_error(exc)
         raise
+    elapsed_s = time.perf_counter() - started_at
+    monitor_log(
+        f"llm request done provider=groq operation=vision model={model} elapsed_s={elapsed_s:.3f}"
+    )
     content = completion.choices[0].message.content or ""
     log_text_block("RAW GROQ VISION RESPONSE", content, max_chars=10000)
     return content

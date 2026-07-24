@@ -161,74 +161,46 @@ def _dump_stt_audio(segment, directory: str, rate: int = 16000) -> Path:
     return path
 
 
-def whisper_stt(
-    name: str = "whisper_stt",
+def stt(
+    provider: str = "mlx",
+    *,
+    name: str = "stt",
+    model: Optional[str] = None,
     model_size: str = "tiny",
-    mode: str = "mlx",
-    debug_audio_dir: Optional[str] = None,
-    timeout_s: float = 20.0,
-    on_status: Optional[Callable[[str, dict], None]] = None,
+    language: str = "en",
     **kwargs,
 ):
-    """Create an STT stage. Use `model_size="medium"` for better letter recognition."""
+    """Create an STT stage that emits final :class:`TranscriptEvent` values."""
 
-    if mode == "mlx":
-        from .stt_mlx import MlxPinnedWhisper
+    provider = provider.lower()
+    if provider == "deepgram":
+        from .stt.deepgram import deepgram_stt
 
-        mlx_stt = MlxPinnedWhisper(model_size=model_size, **kwargs)
-
-        async def transcribe(segment):
-            if debug_audio_dir:
-                _dump_stt_audio(segment, debug_audio_dir)
-            if on_status and mlx_stt.is_loading():
-                on_status("loading", {"model_size": model_size})
-            try:
-                text = await asyncio.wait_for(
-                    mlx_stt.transcribe(segment),
-                    timeout=timeout_s,
-                )
-            except asyncio.TimeoutError:
-                if on_status:
-                    on_status(
-                        "error",
-                        {
-                            "model_size": model_size,
-                            "reason": f"STT timed out after {timeout_s:g}s",
-                        },
-                    )
-                return TranscriptEvent(text="", is_final=True)
-            except Exception as exc:
-                if on_status:
-                    on_status(
-                        "error",
-                        {"model_size": model_size, "reason": str(exc)},
-                    )
-                return TranscriptEvent(text="", is_final=True)
-            if on_status:
-                on_status("ready", {"model_size": model_size})
-            return TranscriptEvent(text=text or "", is_final=True)
-
-        return async_map_stage(transcribe, name=name, on_dispose=mlx_stt.shutdown)
-
-    from .stt import WhisperSTT
-
-    stt = WhisperSTT(mode=mode, model_size=model_size, **kwargs)
-
-    def apply(stream: Stream):
-        def transcribe(segment):
-            if debug_audio_dir:
-                _dump_stt_audio(segment, debug_audio_dir)
-            return TranscriptEvent(
-                text=stt(segment) or "",
-                is_final=True,
-            )
-
-        return stream.pipe(
-            ops.map(transcribe),
+        return deepgram_stt(
             name=name,
+            model=model or "nova-2",
+            language=language,
+            **kwargs,
         )
+    if provider in {"mlx", "faster_whisper"}:
+        from .stt.whisper import whisper_stt
 
-    return apply
+        return whisper_stt(
+            name=name,
+            mode=provider,
+            model_size=model or model_size,
+            language=language,
+            **kwargs,
+        )
+    raise ValueError(f"Unknown STT provider: {provider}")
+
+
+def whisper_stt(*args, **kwargs):
+    """Compatibility alias for the local Whisper STT stage."""
+
+    from .stt.whisper import whisper_stt as local_whisper_stt
+
+    return local_whisper_stt(*args, **kwargs)
 
 
 def drop_while(predicate: Callable[[], bool], name: str = "drop_while"):
@@ -269,6 +241,21 @@ def map_filter_items(
         return stream.pipe(
             ops.map(map_fn),
             ops.filter(filter_fn),
+            name=name,
+        )
+
+    return apply
+
+
+def expand_items(
+    expand_fn: Callable[[Any], Any],
+    name: str = "expand_items",
+):
+    """Expand each stream item into a synchronous sequence of output items."""
+
+    def apply(stream: Stream):
+        return stream.pipe(
+            ops.flat_map(lambda item: reactivex.from_iterable(expand_fn(item))),
             name=name,
         )
 
