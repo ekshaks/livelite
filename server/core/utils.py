@@ -11,7 +11,9 @@ import time
 import functools
 import asyncio
 
-def timeit(name: str = ""):
+from .logging_utils import monitor_time
+
+def timeit(name: str = "", service: str = "runtime"):
     def decorator(func):
         if asyncio.iscoroutinefunction(func):
             @functools.wraps(func)
@@ -20,7 +22,7 @@ def timeit(name: str = ""):
                 result = await func(*args, **kwargs)
                 end_time = time.perf_counter()
                 runtime = end_time - start_time
-                print(f"{name or func.__name__} took {runtime:.4f} seconds to complete")
+                monitor_time(service, name or func.__name__, runtime)
                 return result
             return async_wrapper
         else:
@@ -30,7 +32,7 @@ def timeit(name: str = ""):
                 result = func(*args, **kwargs)
                 end_time = time.perf_counter()
                 runtime = end_time - start_time
-                print(f"{name or func.__name__} took {runtime:.4f} seconds to complete")
+                monitor_time(service, name or func.__name__, runtime)
                 return result
             return sync_wrapper
     return decorator
