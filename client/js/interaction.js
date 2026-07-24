@@ -32,5 +32,5 @@ export function createInteractions(celebration) {
     }
   }
 
-  return { handleGameFeedback };
+  return { handleGameFeedback, showCelebration };
 }

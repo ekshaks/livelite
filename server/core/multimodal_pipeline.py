@@ -8,7 +8,7 @@ from .stream_dsl import (
     filter_items,
     map_items,
     turn_detector,
-    whisper_stt,
+    stt,
 )
 
 
@@ -18,6 +18,8 @@ async def run_multimodal_session(
     mode="av",
     stt_provider="mlx",
     stt_model_size="tiny",
+    stt_model=None,
+    stt_language="en",
     llm_model,
     prompts_path,
     prompt_id="visual_solver",
@@ -40,7 +42,12 @@ async def run_multimodal_session(
     latest_frame = video.latest(name="latest_frame", subs=subs)
 
     turn = audio | turn_detector()
-    transcripts = turn.segments | whisper_stt(mode=stt_provider, model_size=stt_model_size)
+    transcripts = turn.segments | stt(
+        provider=stt_provider,
+        model=stt_model,
+        model_size=stt_model_size,
+        language=stt_language,
+    )
     user_text = transcripts | final_transcript_text()
 
     agent = create_agent(llm_model, prompts_path=prompts_path, prompt_id=prompt_id, name=agent_name)

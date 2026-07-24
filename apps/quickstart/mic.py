@@ -12,7 +12,7 @@ from server.core.stream_dsl import (
     final_transcript_text,
     print_sink,
     turn_detector,
-    whisper_stt,
+    stt,
 )
 from server.core.tts_providers import KokoroFastApiTTSProvider, PlaybackState, tts_sink
 
@@ -32,7 +32,11 @@ async def run_mic_pipeline(args):
             lambda: playback_state.is_playing_or_recent(args.echo_suppress_seconds),
             name="drop_tts_feedback",
         )
-    transcripts = segments | whisper_stt(mode="mlx", model_size=args.model_size)
+    transcripts = segments | stt(
+        provider=args.stt_provider,
+        model=args.stt_model,
+        model_size=args.model_size,
+    )
     user_text = transcripts | final_transcript_text()
 
     user_text.to(print_sink(prefix="User: "), name="print_user_text", subs=subs)
@@ -105,6 +109,8 @@ def parse_args():
     parser.add_argument("--sample-rate", type=int, default=16000)
     parser.add_argument("--block-size", type=int, default=8000)
     parser.add_argument("--model-size", default="tiny")
+    parser.add_argument("--stt-provider", default="mlx")
+    parser.add_argument("--stt-model")
     parser.add_argument("--tts", action="store_true", help="Speak transcribed text with Kokoro TTS.")
     parser.add_argument("--echo-suppress-seconds", type=float, default=2.0)
     parser.add_argument("--allow-interruptions", action="store_true", help="Keep VAD active during TTS so speech can interrupt playback.")

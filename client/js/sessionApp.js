@@ -101,6 +101,7 @@ async function loadAppUI(config) {
     await appModule.register(Object.freeze({
       appConfig: Object.freeze({ ...config }),
       interactionRoot: elements.celebration,
+      showCelebration: interactions.showCelebration,
       registerMessageHandler,
       sendClientMessage: (message) => TrackManager.sendData(message),
       uiApiVersion: UI_API_VERSION,
