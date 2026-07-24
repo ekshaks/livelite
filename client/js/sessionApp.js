@@ -3,10 +3,12 @@ import { createMediaControls } from "./mediaControls.js";
 import { TrackManager } from "./trackManager.js";
 import { createTranscriptView } from "./transcriptView.js";
 
-const UI_API_VERSION = 1;
+const UI_API_VERSION = 2;
 
 const elements = {
   appName: document.getElementById("appName"),
+  appControls: document.getElementById("appControls"),
+  appOverlay: document.getElementById("appOverlay"),
   audioButton: document.getElementById("muteAudioBtn"),
   celebration: document.getElementById("celebration"),
   connectionStatus: document.getElementById("connectionStatus"),
@@ -14,7 +16,7 @@ const elements = {
   minimizeVideoButton: document.getElementById("minimizeVideoBtn"),
   statusText: document.getElementById("statusText"),
   transcript: document.getElementById("transcriptionText"),
-  videoButton: document.getElementById("stopVideoBtn"),
+  cameraButton: document.getElementById("cameraToggleBtn"),
   videoPanel: document.getElementById("videoPanel"),
   videoState: document.getElementById("videoState"),
   workspace: document.querySelector(".workspace"),
@@ -46,9 +48,9 @@ const interactions = createInteractions(elements.celebration);
 
 const messageHandlers = new Map();
 
-function registerMessageHandler(type, handler) {
+function onServerEvent(type, handler) {
   if (typeof type !== "string" || typeof handler !== "function") {
-    throw new TypeError("registerMessageHandler requires a message type and handler");
+    throw new TypeError("onServerEvent requires a message type and handler");
   }
   const handlers = messageHandlers.get(type) || [];
   handlers.push(handler);
@@ -61,8 +63,8 @@ function registerMessageHandler(type, handler) {
   };
 }
 
-registerMessageHandler("transcript", (message) => transcriptView.append(message));
-registerMessageHandler(
+onServerEvent("transcript", (message) => transcriptView.append(message));
+onServerEvent(
   "game_feedback",
   (message) => interactions.handleGameFeedback(message),
 );
@@ -100,10 +102,14 @@ async function loadAppUI(config) {
     }
     await appModule.register(Object.freeze({
       appConfig: Object.freeze({ ...config }),
+      slots: Object.freeze({
+        controls: elements.appControls,
+        overlay: elements.appOverlay,
+      }),
       interactionRoot: elements.celebration,
       showCelebration: interactions.showCelebration,
-      registerMessageHandler,
-      sendClientMessage: (message) => TrackManager.sendData(message),
+      onServerEvent,
+      sendUICommand: (message) => TrackManager.sendData(message),
       uiApiVersion: UI_API_VERSION,
     }));
   } catch (error) {

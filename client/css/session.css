@@ -217,7 +217,14 @@ button { font: inherit; }
   font-size: .78rem;
 }
 
-.minimize-video-btn {
+.video-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
+
+.minimize-video-btn,
+.camera-toggle-btn {
   width: 44px;
   height: 44px;
   flex: 0 0 auto;
@@ -231,8 +238,39 @@ button { font: inherit; }
   cursor: pointer;
 }
 
-.minimize-video-btn:hover { background: var(--surface-raised); }
-.minimize-video-btn:focus-visible { outline: 3px solid #a9f3df; outline-offset: 1px; }
+.minimize-video-btn:hover,
+.camera-toggle-btn:hover { background: var(--surface-raised); }
+
+.minimize-video-btn:focus-visible,
+.camera-toggle-btn:focus-visible { outline: 3px solid #a9f3df; outline-offset: 1px; }
+
+.camera-toggle-btn[aria-pressed="true"] {
+  background: var(--accent);
+  color: var(--accent-ink);
+}
+
+.camera-toggle-btn[data-state="denied"] {
+  color: var(--danger);
+}
+
+.camera-toggle-btn:disabled {
+  cursor: wait;
+  opacity: .72;
+}
+
+.camera-toggle-btn .control-icon {
+  width: 20px;
+  height: 20px;
+}
+
+.camera-toggle-btn .btn-text {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
 
 .minimize-video-btn svg {
   width: 20px;
@@ -248,7 +286,7 @@ button { font: inherit; }
   overflow: hidden;
 }
 
-video {
+.video-frame > video {
   width: 100%;
   height: 100%;
   display: block;
@@ -318,7 +356,32 @@ video {
   backdrop-filter: blur(16px);
 }
 
-.control-btn {
+.app-overlay {
+  position: fixed;
+  top: max(18px, env(safe-area-inset-top));
+  right: max(18px, env(safe-area-inset-right));
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.app-overlay:empty {
+  display: none;
+}
+
+.app-controls {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.app-controls:empty {
+  display: none;
+}
+
+.dock-action {
   min-width: 140px;
   min-height: 48px;
   display: inline-flex;
@@ -332,30 +395,32 @@ video {
   color: var(--text);
   cursor: pointer;
   font-weight: 700;
+  touch-action: manipulation;
   transition: transform .15s ease, border-color .15s ease, background .15s ease;
 }
 
-.control-btn:hover { border-color: #627690; }
-.control-btn:active { transform: scale(.97); }
-.control-btn:focus-visible { outline: 3px solid #a9f3df; outline-offset: 2px; }
+.dock-action:hover { border-color: #627690; }
+.dock-action:active { transform: scale(.97); }
+.dock-action:focus-visible { outline: 3px solid #a9f3df; outline-offset: 2px; }
 
-.control-btn[aria-pressed="true"] {
+.dock-action[aria-pressed="true"],
+.dock-action--primary {
   border-color: var(--accent);
   background: var(--accent);
   color: var(--accent-ink);
 }
 
-.control-btn[data-state="denied"] {
+.dock-action[data-state="denied"] {
   border-color: var(--danger);
   color: var(--danger);
 }
 
-.control-btn:disabled {
+.dock-action:disabled {
   cursor: wait;
   opacity: .72;
 }
 
-.control-btn svg {
+.dock-action svg {
   width: 20px;
   height: 20px;
   flex: 0 0 auto;
@@ -458,11 +523,19 @@ video {
     padding-bottom: max(8px, env(safe-area-inset-bottom));
   }
 
-  .control-btn {
+  .dock-action {
     min-width: 0;
-    flex: 1 1 0;
     min-height: 52px;
     padding-inline: 10px;
+  }
+
+  .control-dock > .dock-action,
+  .app-controls {
+    flex: 1 1 0;
+  }
+
+  .app-controls > * {
+    width: 100%;
   }
 }
 
@@ -477,7 +550,7 @@ video {
   .transcript-panel { grid-row: auto; min-height: 0; }
   .panel-header { padding-block: 8px; }
   .control-dock { min-height: 54px; padding-block: 4px; }
-  .control-btn { min-height: 44px; }
+  .dock-action { min-height: 44px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
