@@ -6,7 +6,7 @@ import time
 import yaml
 from PIL import Image as PILImage
 
-from .logging_utils import log_text_block, monitor_log
+from .logging_utils import log_text_block, monitor_log, monitor_time
 from .utils import timeit
 
 
@@ -143,17 +143,19 @@ async def call_groq_chat(
         )
     except Exception as exc:
         elapsed_s = time.perf_counter() - started_at
-        monitor_log(
-            "llm request failed "
-            f"provider=groq operation=chat model={model} elapsed_s={elapsed_s:.3f} "
-            f"error={type(exc).__name__}"
+        monitor_time(
+            "llm",
+            "chat",
+            elapsed_s,
+            provider="groq",
+            model=model,
+            outcome="failed",
+            error=type(exc).__name__,
         )
         log_groq_error(exc)
         raise
     elapsed_s = time.perf_counter() - started_at
-    monitor_log(
-        f"llm request done provider=groq operation=chat model={model} elapsed_s={elapsed_s:.3f}"
-    )
+    monitor_time("llm", "chat", elapsed_s, provider="groq", model=model)
     content = completion.choices[0].message.content or ""
     log_text_block("RAW GROQ RESPONSE", content, max_chars=10000)
     return content
@@ -202,17 +204,19 @@ async def call_groq_vision(
         )
     except Exception as exc:
         elapsed_s = time.perf_counter() - started_at
-        monitor_log(
-            "llm request failed "
-            f"provider=groq operation=vision model={model} elapsed_s={elapsed_s:.3f} "
-            f"error={type(exc).__name__}"
+        monitor_time(
+            "llm",
+            "vision",
+            elapsed_s,
+            provider="groq",
+            model=model,
+            outcome="failed",
+            error=type(exc).__name__,
         )
         log_groq_error(exc)
         raise
     elapsed_s = time.perf_counter() - started_at
-    monitor_log(
-        f"llm request done provider=groq operation=vision model={model} elapsed_s={elapsed_s:.3f}"
-    )
+    monitor_time("llm", "vision", elapsed_s, provider="groq", model=model)
     content = completion.choices[0].message.content or ""
     log_text_block("RAW GROQ VISION RESPONSE", content, max_chars=10000)
     return content
@@ -251,18 +255,38 @@ def call_gemini_vision_sync(
     image_bytes = video_frame_to_png_bytes(frame)
     monitor_log(f"gemini vision frame converted bytes={len(image_bytes)}")
     monitor_log("gemini vision generate_content request start")
-    response = client.models.generate_content(
-        model=gemini_model_id(model_id),
-        contents=[
-            types.Part.from_bytes(
-                data=image_bytes,
-                mime_type="image/png",
-            ),
-            user_prompt,
-        ],
-        config=config,
-    )
+    started_at = time.perf_counter()
+    try:
+        response = client.models.generate_content(
+            model=gemini_model_id(model_id),
+            contents=[
+                types.Part.from_bytes(
+                    data=image_bytes,
+                    mime_type="image/png",
+                ),
+                user_prompt,
+            ],
+            config=config,
+        )
+    except Exception as exc:
+        monitor_time(
+            "llm",
+            "vision",
+            time.perf_counter() - started_at,
+            provider="gemini",
+            model=gemini_model_id(model_id),
+            outcome="failed",
+            error=type(exc).__name__,
+        )
+        raise
     monitor_log("gemini vision generate_content request done")
+    monitor_time(
+        "llm",
+        "vision",
+        time.perf_counter() - started_at,
+        provider="gemini",
+        model=gemini_model_id(model_id),
+    )
     content = response.text or ""
     log_text_block("RAW GEMINI VISION RESPONSE", content, max_chars=10000)
     return content
@@ -337,7 +361,9 @@ async def vlm_agent(text, last_frame, prompts_file, system_prompt_id="vlm_math")
         f"has_image={last_frame is not None}"
     )
 
+    started_at = time.perf_counter()
     response = model.generate_content(prompt_parts)
+    monitor_time("llm", "vision", time.perf_counter() - started_at, provider="gemini")
     log_text_block("RAW VLM RESPONSE", response.text, max_chars=10000)
     return response
 
@@ -359,12 +385,14 @@ async def call_vlm_agent(agent, text, last_frame):
 
     monitor_log(f"call_vlm_agent images_count={len(images)}")
 
+    started_at = time.perf_counter()
     response = await agent.arun(text, images=images)
+    monitor_time("llm", "agent_run", time.perf_counter() - started_at, provider="agent")
     log_text_block("RAW VLM RESPONSE", response.content, max_chars=10000)
     return response
 
 
-@timeit(name="Call_LLM")
+@timeit(name="call", service="llm")
 async def call_llm(agent, text, last_frame, mode="av"):
     if mode == "av":
         response = await call_vlm_agent(agent, text, last_frame)

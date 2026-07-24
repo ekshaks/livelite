@@ -1,6 +1,9 @@
 import asyncio
+import time
 import warnings
 from pathlib import Path
+
+from ..logging_utils import monitor_time
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -29,10 +32,19 @@ def get_kokoro():
 
 async def _create_kokoro_audio(text, voice="af_sarah", speed=1.0, lang="en-us"):
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(
+    started_at = time.perf_counter()
+    audio = await loop.run_in_executor(
         None,
         lambda: get_kokoro().create(text, voice=voice, speed=speed, lang=lang),
     )
+    monitor_time(
+        "tts",
+        "synthesize",
+        time.perf_counter() - started_at,
+        provider="kokoro_onnx",
+        voice=voice,
+    )
+    return audio
 
 
 async def _play_kokoro_audio(text, interrupt_event, voice="af_sarah", speed=1.0, lang="en-us"):

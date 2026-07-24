@@ -2,24 +2,27 @@ import asyncio
 import time
 from typing import Any, Optional
 
+from ..logging_utils import monitor_time
+
 KOKORO_PCM_SAMPLE_RATE = 24000
 
 
-def _print_tts_metrics(timings, chunk_count):
-    if timings["first_buffer_received"] is None:
-        print("Error: No audio data was received")
-        return
-
-    time_to_first_buffer = (timings["first_buffer_received"] - timings["start"]) * 1000
-    total_time = (timings["end"] - timings["start"]) * 1000
-    streaming_duration = (timings["end"] - timings["first_buffer_received"]) * 1000
-
-    print("\n--- TTS Performance Metrics ---")
-    print(f"Time to first buffer: {time_to_first_buffer:.2f} ms")
-    print(f"Total processing time: {total_time:.2f} ms")
-    print(f"Streaming duration: {streaming_duration:.2f} ms")
-    print(f"Number of chunks: {chunk_count}")
-    print("---  ---\n")
+def _log_tts_metrics(timings, chunk_count):
+    if timings["first_buffer_received"] is not None:
+        monitor_time(
+            "tts",
+            "first_audio",
+            timings["first_buffer_received"] - timings["start"],
+            provider="kokoro",
+        )
+    monitor_time(
+        "tts",
+        "stream_complete",
+        timings["end"] - timings["start"],
+        provider="kokoro",
+        chunks=chunk_count,
+        first_audio_received=timings["first_buffer_received"] is not None,
+    )
 
 
 async def _tts_kokoro_stream_chunks(text, interrupt_event, on_audio_block):
@@ -56,7 +59,7 @@ async def _tts_kokoro_stream_chunks(text, interrupt_event, on_audio_block):
         print(f"Error during TTS streaming: {exc}")
     finally:
         timings["end"] = time.perf_counter()
-        _print_tts_metrics(timings, chunk_count)
+        _log_tts_metrics(timings, chunk_count)
 
 
 async def tts_kokoro_stream_async(text, interrupt_event):

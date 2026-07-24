@@ -15,3 +15,14 @@ def log_text_block(title, text, max_chars=1600):
 
 def monitor_log(message):
     print(f"[monitor] {message}")
+
+
+def monitor_time(service, operation, elapsed_s, **fields):
+    """Emit one machine-readable latency line for a runtime operation."""
+    details = [
+        f"service={service}",
+        f"operation={operation}",
+        *(f"{key}={value}" for key, value in fields.items() if value is not None),
+        f"elapsed_ms={elapsed_s * 1000:.0f}",
+    ]
+    print(f"[monitor-time] {' '.join(details)}")
