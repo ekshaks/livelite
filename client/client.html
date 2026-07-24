@@ -47,11 +47,19 @@
       <section id="videoPanel" class="panel video-panel" data-video="off" data-minimized="false" aria-label="Camera preview">
         <header class="video-toolbar">
           <span>Camera preview</span>
-          <button id="minimizeVideoBtn" class="minimize-video-btn" type="button" aria-expanded="true" aria-controls="videoFrame videoState" aria-label="Minimize camera preview">
-            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M6 9l6 6 6-6"/>
-            </svg>
-          </button>
+          <div class="video-toolbar-actions">
+            <button id="cameraToggleBtn" class="camera-toggle-btn" type="button" aria-pressed="false" aria-label="Turn camera on">
+              <svg class="control-icon" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
+                <use href="#icon-camera-off"></use>
+              </svg>
+              <span class="btn-text">Camera off</span>
+            </button>
+            <button id="minimizeVideoBtn" class="minimize-video-btn" type="button" aria-expanded="true" aria-controls="videoFrame videoState" aria-label="Minimize camera preview">
+              <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M6 9l6 6 6-6"/>
+              </svg>
+            </button>
+          </div>
         </header>
         <div id="videoFrame" class="video-frame">
           <video id="localVideo" autoplay playsinline muted></video>
@@ -66,23 +74,20 @@
       </section>
     </section>
 
+    <div id="appOverlay" class="app-overlay" role="group" aria-label="App actions and status"></div>
+
     <div id="celebration" class="celebration" hidden aria-live="polite">
       <div class="celebration-message">Correct! 🎉</div>
     </div>
 
     <nav class="control-dock" aria-label="Session controls">
-      <button id="muteAudioBtn" class="control-btn" type="button" aria-pressed="false" aria-label="Turn microphone on">
+      <button id="muteAudioBtn" class="dock-action" type="button" aria-pressed="false" aria-label="Turn microphone on">
         <svg class="control-icon" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
           <use href="#icon-mic-off"></use>
         </svg>
         <span class="btn-text">Mic off</span>
       </button>
-      <button id="stopVideoBtn" class="control-btn" type="button" aria-pressed="false" aria-label="Turn camera on">
-        <svg class="control-icon" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2">
-          <use href="#icon-camera-off"></use>
-        </svg>
-        <span class="btn-text">Camera off</span>
-      </button>
+      <div id="appControls" class="app-controls" role="group" aria-label="App controls"></div>
     </nav>
   </main>
 

@@ -28,7 +28,7 @@ export function createMediaControls({ trackManager, elements, onStatus }) {
     videoPanel,
     videoState,
     minimizeVideoButton,
-    videoButton,
+    cameraButton,
     audioButton,
   } = elements;
 
@@ -43,9 +43,9 @@ export function createMediaControls({ trackManager, elements, onStatus }) {
     );
   });
 
-  videoButton.addEventListener("click", async () => {
-    videoButton.disabled = true;
-    setControl(videoButton, {
+  cameraButton.addEventListener("click", async () => {
+    cameraButton.disabled = true;
+    setControl(cameraButton, {
       pressed: state.videoOn,
       text: state.videoOn ? "Stopping…" : "Starting…",
       label: state.videoOn ? "Stopping camera" : "Starting camera",
@@ -65,7 +65,7 @@ export function createMediaControls({ trackManager, elements, onStatus }) {
 
       videoPanel.dataset.video = state.videoOn ? "on" : "off";
       videoState.textContent = state.videoOn ? "Video on" : "Video off";
-      setControl(videoButton, state.videoOn
+      setControl(cameraButton, state.videoOn
         ? { pressed: true, text: "Camera on", label: "Turn camera off", icon: "icon-camera-on" }
         : { pressed: false, text: "Camera off", label: "Turn camera on", icon: "icon-camera-off" });
     } catch (error) {
@@ -73,7 +73,7 @@ export function createMediaControls({ trackManager, elements, onStatus }) {
       const message = permissionMessage("Camera", error);
       videoState.textContent = message;
       onStatus(message, "error");
-      setControl(videoButton, {
+      setControl(cameraButton, {
         pressed: false,
         text: "Camera blocked",
         label: `${message}. Try camera again`,
@@ -81,7 +81,7 @@ export function createMediaControls({ trackManager, elements, onStatus }) {
         icon: "icon-camera-off",
       });
     } finally {
-      videoButton.disabled = false;
+      cameraButton.disabled = false;
     }
   });
 

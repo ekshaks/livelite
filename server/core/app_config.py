@@ -4,7 +4,7 @@ import yaml
 
 from .server_config import web_config
 
-UI_API_VERSION = 1
+UI_API_VERSION = 2
 
 
 def _app_asset_url(value):
