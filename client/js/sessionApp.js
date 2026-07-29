@@ -12,6 +12,7 @@ const elements = {
   audioButton: document.getElementById("muteAudioBtn"),
   celebration: document.getElementById("celebration"),
   connectionStatus: document.getElementById("connectionStatus"),
+  gamesLink: document.getElementById("gamesLink"),
   localVideo: document.getElementById("localVideo"),
   minimizeVideoButton: document.getElementById("minimizeVideoBtn"),
   statusText: document.getElementById("statusText"),
@@ -27,9 +28,16 @@ function setStatus(message, state = "connected") {
   elements.connectionStatus.dataset.state = state;
 }
 
-async function loadClientConfig() {
+function selectedGameId() {
+  const match = window.location.pathname.match(/^\/games\/([a-z][a-z0-9-]*)\/?$/);
+  return match ? match[1] : null;
+}
+
+async function loadClientConfig(gameId) {
   try {
-    const response = await fetch("/client-config");
+    const response = await fetch(
+      gameId ? `/api/games/${encodeURIComponent(gameId)}` : "/client-config",
+    );
     if (!response.ok) return {};
     const config = await response.json();
     if (typeof config.app_name === "string" && config.app_name.trim()) {
@@ -140,11 +148,24 @@ createMediaControls({
 });
 
 (async () => {
-  const config = await loadClientConfig();
+  const gameId = selectedGameId();
+  if (gameId) {
+    elements.gamesLink.hidden = false;
+  }
+  const config = await loadClientConfig(gameId);
+  if (
+    Array.isArray(config.capabilities) &&
+    !config.capabilities.includes("video")
+  ) {
+    elements.videoPanel.hidden = true;
+  }
   await loadAppUI(config);
   setStatus("Connecting…", "connecting");
   try {
-    await TrackManager.initConnection(onDataMessage);
+    const offerUrl = gameId
+      ? `/games/${encodeURIComponent(gameId)}/offer`
+      : "/offer";
+    await TrackManager.initConnection(onDataMessage, offerUrl);
     setStatus("Connected", "connected");
   } catch (error) {
     console.error("Connection failed", error);

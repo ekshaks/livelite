@@ -82,7 +82,7 @@ async def setup_video_track(pc, track: MediaStreamTrack, video_obs_input, stop_e
     
     print("Video processing stopped")
 
-def pc_session_setup(run_session, config):
+def pc_session_setup(run_session, config, on_peer_close=None):
     
     pc = RTCPeerConnection()
     
@@ -120,6 +120,10 @@ def pc_session_setup(run_session, config):
             if channel.label == "server_text":
                 stop_event.set()
                 session.closed.set()
+                if on_peer_close is not None:
+                    on_peer_close(pc)
+                if pc.connectionState != "closed":
+                    main_loop.create_task(pc.close())
 
         @channel.on("message")
         def on_message(message):
@@ -160,8 +164,10 @@ def pc_session_setup(run_session, config):
             session.closed.set()
             if not session_task.done():
                 session_task.cancel()
-            # pcs.discard(pc) #TODO: add
-            await pc.close()
+            if on_peer_close is not None:
+                on_peer_close(pc)
+            if pc.connectionState != "closed":
+                await pc.close()
     
     pc.on("connectionstatechange", on_connectionstatechange)
     return pc
