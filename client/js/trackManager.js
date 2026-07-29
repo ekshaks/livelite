@@ -16,7 +16,7 @@ export const TrackManager = {
 
 // Inside initConnection
 
-  async initConnection(onDataMessage=null) {
+  async initConnection(onDataMessage=null, offerUrl="/offer") {
     this.pc = new RTCPeerConnection();
     this.onDataMessage = onDataMessage;
 
@@ -53,11 +53,14 @@ export const TrackManager = {
     const offer = await this.pc.createOffer();
     await this.pc.setLocalDescription(offer);
 
-    const res = await fetch("/offer", {
+    const res = await fetch(offerUrl, {
       method: "POST",
       body: JSON.stringify(offer),
       headers: { "Content-Type": "application/json" }
     });
+    if (!res.ok) {
+      throw new Error(`WebRTC offer failed with status ${res.status}`);
+    }
     const answer = await res.json();
     await this.pc.setRemoteDescription(answer);
   },

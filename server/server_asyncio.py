@@ -6,17 +6,21 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc import MediaStreamError
 
 from .core.utils import rx_Subject as Subject # for input audio/video subjects
+from .games.routes import GameRoutes
 from .setup_tracks import pc_session_setup
 
 DEFAULT_CLIENT_HTML_PATH = Path(__file__).parent.parent / "client/client.html"
+DEFAULT_DASHBOARD_HTML_PATH = Path(__file__).parent.parent / "client/dashboard.html"
 
 class Server:
     def __init__(
         self,
-        run_session: Callable,
+        run_session: Callable = None,
         client_html_path: Path = DEFAULT_CLIENT_HTML_PATH,
         config: Dict = {},
         app_assets_dir: Path = None,
+        game_registry=None,
+        dashboard_html_path: Path = DEFAULT_DASHBOARD_HTML_PATH,
     ):
         """Initialize the WebRTC server with a session runner.
         
@@ -24,12 +28,16 @@ class Server:
             run_session: Async function that owns one SessionContext lifecycle.
         """
 
+        if (run_session is None) == (game_registry is None):
+            raise ValueError("Provide either run_session or game_registry")
         self.run_session = run_session
+        self.game_registry = game_registry
         self.pcs: Set[RTCPeerConnection] = set()
         self.app = web.Application()
         self.config = config
         self.app_assets_dir = self._resolve_app_assets_dir(app_assets_dir)
-        self._setup_routes(client_html_path)
+        self.dashboard_html_path = Path(dashboard_html_path)
+        self._setup_routes(Path(client_html_path))
         self.app.on_shutdown.append(self.on_shutdown)
 
     @staticmethod
@@ -45,27 +53,35 @@ class Server:
     def _setup_routes(self, client_html_path):
         """Set up the web application routes."""
         print('setting up routes..')
-        self.app.router.add_post("/offer", self.offer_handler)
+        if self.game_registry is None:
+            self.app.router.add_post("/offer", self.offer_handler)
 
-        async def client_config(request):
-            return web.json_response(self.config.get("client_config", {}))
+            async def client_config(request):
+                return web.json_response(self.config.get("client_config", {}))
 
-        self.app.router.add_get("/client-config", client_config)
+            self.app.router.add_get("/client-config", client_config)
 
-        if self.app_assets_dir is not None:
-            self.app.router.add_static(
-                "/app-assets/",
-                path=self.app_assets_dir,
-                name="app_assets",
-                follow_symlinks=False,
-            )
+            if self.app_assets_dir is not None:
+                self.app.router.add_static(
+                    "/app-assets/",
+                    path=self.app_assets_dir,
+                    name="app_assets",
+                    follow_symlinks=False,
+                )
+        else:
+            GameRoutes(
+                registry=self.game_registry,
+                client_html_path=client_html_path,
+                dashboard_html_path=self.dashboard_html_path,
+                accept_offer=self._accept_offer,
+                base_transport_config=self.config,
+            ).register(self.app)
         
         client_dir = client_html_path.parent  # base directory containing index.html, js/, assets/, etc.
 
         async def serve_client_file(request):
             requested_path = request.match_info.get('path', '')
             if requested_path == '':
-                # root → serve index.html
                 return web.FileResponse(client_html_path)
 
             # Resolve full path and prevent directory traversal
@@ -76,12 +92,18 @@ class Server:
 
         # catch-all route
         self.app.router.add_get("/{path:.*}", serve_client_file)
-        
-   
+
     async def offer_handler(self, request):
         """Handle WebRTC offer and set up media processing pipeline."""
+        return await self._accept_offer(request, self.run_session, self.config)
+
+    async def _accept_offer(self, request, run_session, config):
         params = await request.json()
-        pc = pc_session_setup(self.run_session, self.config)
+        pc = pc_session_setup(
+            run_session,
+            config,
+            on_peer_close=self.pcs.discard,
+        )
         self.pcs.add(pc)
  
         
@@ -105,7 +127,7 @@ class Server:
         """Handle application shutdown."""
         print("Shutting down...")
         # Close all peer connections
-        for pc in self.pcs:
+        for pc in list(self.pcs):
             await pc.close()
         self.pcs.clear()
     
