@@ -1,4 +1,7 @@
+import { initializeUserSelector } from "./userSelector.js";
+
 const gameList = document.getElementById("gameList");
+const userSelector = document.getElementById("userSelector");
 
 function renderGames(games) {
   gameList.replaceChildren();
@@ -48,4 +51,5 @@ async function loadGames() {
   }
 }
 
+initializeUserSelector(userSelector);
 loadGames();

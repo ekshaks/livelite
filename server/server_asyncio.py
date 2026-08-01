@@ -20,6 +20,7 @@ class Server:
         config: Dict = {},
         app_assets_dir: Path = None,
         game_registry=None,
+        user_directory=None,
         dashboard_html_path: Path = DEFAULT_DASHBOARD_HTML_PATH,
     ):
         """Initialize the WebRTC server with a session runner.
@@ -32,6 +33,7 @@ class Server:
             raise ValueError("Provide either run_session or game_registry")
         self.run_session = run_session
         self.game_registry = game_registry
+        self.user_directory = user_directory
         self.pcs: Set[RTCPeerConnection] = set()
         self.app = web.Application()
         self.config = config
@@ -71,6 +73,7 @@ class Server:
         else:
             GameRoutes(
                 registry=self.game_registry,
+                user_directory=self.user_directory,
                 client_html_path=client_html_path,
                 dashboard_html_path=self.dashboard_html_path,
                 accept_offer=self._accept_offer,
