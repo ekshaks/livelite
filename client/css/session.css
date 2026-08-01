@@ -49,6 +49,38 @@ button { font: inherit; }
   min-width: 0;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  min-width: 0;
+}
+
+.user-selector-host {
+  min-height: 40px;
+}
+
+.global-user-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: .875rem;
+  font-weight: 700;
+}
+
+.global-user-selector select {
+  min-height: 40px;
+  padding: 6px 30px 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+}
+
 .brand {
   margin: 0;
   font-size: clamp(1.25rem, 3vw, 1.65rem);
@@ -487,6 +519,18 @@ button { font: inherit; }
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(0, 1fr);
     gap: 10px;
+  }
+
+  .header-actions {
+    gap: 7px;
+  }
+
+  .global-user-selector > span {
+    display: none;
+  }
+
+  .global-user-selector select {
+    max-width: 120px;
   }
 
   .workspace.video-minimized {

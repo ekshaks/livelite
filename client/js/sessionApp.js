@@ -2,6 +2,7 @@ import { createInteractions } from "./interaction.js";
 import { createMediaControls } from "./mediaControls.js";
 import { TrackManager } from "./trackManager.js";
 import { createTranscriptView } from "./transcriptView.js";
+import { initializeUserSelector } from "./userSelector.js";
 
 const UI_API_VERSION = 2;
 
@@ -17,6 +18,7 @@ const elements = {
   minimizeVideoButton: document.getElementById("minimizeVideoBtn"),
   statusText: document.getElementById("statusText"),
   transcript: document.getElementById("transcriptionText"),
+  userSelector: document.getElementById("userSelector"),
   cameraButton: document.getElementById("cameraToggleBtn"),
   videoPanel: document.getElementById("videoPanel"),
   videoState: document.getElementById("videoState"),
@@ -152,7 +154,10 @@ createMediaControls({
   if (gameId) {
     elements.gamesLink.hidden = false;
   }
-  const config = await loadClientConfig(gameId);
+  const [config, userId] = await Promise.all([
+    loadClientConfig(gameId),
+    initializeUserSelector(elements.userSelector, { reloadOnChange: true }),
+  ]);
   if (
     Array.isArray(config.capabilities) &&
     !config.capabilities.includes("video")
@@ -162,9 +167,12 @@ createMediaControls({
   await loadAppUI(config);
   setStatus("Connecting…", "connecting");
   try {
-    const offerUrl = gameId
+    const offerPath = gameId
       ? `/games/${encodeURIComponent(gameId)}/offer`
       : "/offer";
+    const offerUrl = userId
+      ? `${offerPath}?user_id=${encodeURIComponent(userId)}`
+      : offerPath;
     await TrackManager.initConnection(onDataMessage, offerUrl);
     setStatus("Connected", "connected");
   } catch (error) {

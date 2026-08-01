@@ -27,10 +27,13 @@
   <main class="app-shell">
     <header class="app-header">
       <h1 id="appName" class="brand">Mulive</h1>
-      <a id="gamesLink" href="/" hidden>Games</a>
-      <div id="connectionStatus" class="connection-status" data-state="connecting" role="status" aria-live="polite">
-        <span class="status-dot" aria-hidden="true"></span>
-        <span id="statusText">Connecting…</span>
+      <div class="header-actions">
+        <a id="gamesLink" href="/" hidden>Games</a>
+        <div id="userSelector" class="user-selector-host" aria-label="Current user"></div>
+        <div id="connectionStatus" class="connection-status" data-state="connecting" role="status" aria-live="polite">
+          <span class="status-dot" aria-hidden="true"></span>
+          <span id="statusText">Connecting…</span>
+        </div>
       </div>
     </header>
 

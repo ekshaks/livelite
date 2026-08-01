@@ -15,6 +15,7 @@ class SessionContext:
     video_input: Any
     client_input: Any
     main_loop: asyncio.AbstractEventLoop
+    user_id: str | None = None
     ready: asyncio.Event = field(default_factory=asyncio.Event)
     closed: asyncio.Event = field(default_factory=asyncio.Event)
 

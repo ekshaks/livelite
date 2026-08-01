@@ -3,6 +3,7 @@ from pathlib import Path
 
 from server.core.app_config import app_section
 from server.core.server_config import web_config
+from server.core.user_profiles import load_user_directory
 from server.server_asyncio import Server
 
 from .loader import load_game_catalog
@@ -26,6 +27,9 @@ def parse_args():
 def main():
     args = parse_args()
     registry, catalog = load_game_catalog(Path(args.catalog))
+    catalog_path = Path(args.catalog).resolve()
+    users_path = catalog_path.parent / str(catalog.get("users") or "users.yml")
+    user_directory = load_user_directory(users_path)
     for unavailable in registry.unavailable_games():
         print(
             "Game unavailable: "
@@ -46,6 +50,7 @@ def main():
 
     server = Server(
         game_registry=registry,
+        user_directory=user_directory,
         config=web_config(use_https=use_https, **server_config),
     )
     server.run(host=host, port=port)

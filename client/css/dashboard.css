@@ -23,16 +23,46 @@ body {
   padding: clamp(3rem, 8vw, 7rem) 0;
 }
 
+.dashboard-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
 .eyebrow {
-  margin: 0 0 0.5rem;
+  margin: 0;
   color: #93c5fd;
   font-weight: 700;
   letter-spacing: 0.12em;
   text-transform: uppercase;
 }
 
+.user-selector-host {
+  min-height: 2.5rem;
+}
+
+.global-user-selector {
+  display: inline-flex;
+  align-items: center;
+  gap: .6rem;
+  color: #cbd5e1;
+  font-size: .9rem;
+  font-weight: 700;
+}
+
+.global-user-selector select {
+  min-height: 2.5rem;
+  padding: .45rem 2rem .45rem .75rem;
+  border: 1px solid #475569;
+  border-radius: .75rem;
+  background: #172033;
+  color: #f8fafc;
+  font: inherit;
+}
+
 h1 {
-  margin: 0;
+  margin: .5rem 0 0;
   font-size: clamp(2.5rem, 7vw, 5rem);
   line-height: 1;
 }
@@ -102,4 +132,14 @@ h1 {
 
 .error {
   color: #fca5a5;
+}
+
+@media (max-width: 520px) {
+  .global-user-selector > span {
+    display: none;
+  }
+
+  .global-user-selector select {
+    max-width: 120px;
+  }
 }
