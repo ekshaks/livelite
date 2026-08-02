@@ -6,7 +6,7 @@ from aiortc import RTCPeerConnection, RTCSessionDescription
 from aiortc import MediaStreamError
 
 from .core.utils import rx_Subject as Subject # for input audio/video subjects
-from .games.routes import GameRoutes
+from .apps.routes import AppRoutes
 from .setup_tracks import pc_session_setup
 
 DEFAULT_CLIENT_HTML_PATH = Path(__file__).parent.parent / "client/client.html"
@@ -19,7 +19,7 @@ class Server:
         client_html_path: Path = DEFAULT_CLIENT_HTML_PATH,
         config: Dict = {},
         app_assets_dir: Path = None,
-        game_registry=None,
+        app_registry=None,
         user_directory=None,
         dashboard_html_path: Path = DEFAULT_DASHBOARD_HTML_PATH,
     ):
@@ -29,10 +29,10 @@ class Server:
             run_session: Async function that owns one SessionContext lifecycle.
         """
 
-        if (run_session is None) == (game_registry is None):
-            raise ValueError("Provide either run_session or game_registry")
+        if (run_session is None) == (app_registry is None):
+            raise ValueError("Provide either run_session or app_registry")
         self.run_session = run_session
-        self.game_registry = game_registry
+        self.app_registry = app_registry
         self.user_directory = user_directory
         self.pcs: Set[RTCPeerConnection] = set()
         self.app = web.Application()
@@ -55,7 +55,7 @@ class Server:
     def _setup_routes(self, client_html_path):
         """Set up the web application routes."""
         print('setting up routes..')
-        if self.game_registry is None:
+        if self.app_registry is None:
             self.app.router.add_post("/offer", self.offer_handler)
 
             async def client_config(request):
@@ -71,8 +71,8 @@ class Server:
                     follow_symlinks=False,
                 )
         else:
-            GameRoutes(
-                registry=self.game_registry,
+            AppRoutes(
+                registry=self.app_registry,
                 user_directory=self.user_directory,
                 client_html_path=client_html_path,
                 dashboard_html_path=self.dashboard_html_path,

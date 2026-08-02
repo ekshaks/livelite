@@ -1,55 +1,55 @@
 import { initializeUserSelector } from "./userSelector.js";
 
-const gameList = document.getElementById("gameList");
+const appList = document.getElementById("appList");
 const userSelector = document.getElementById("userSelector");
 
-function renderGames(games) {
-  gameList.replaceChildren();
+function renderApps(apps) {
+  appList.replaceChildren();
 
-  if (!games.length) {
-    gameList.innerHTML = '<p class="status">No games are available.</p>';
+  if (!apps.length) {
+    appList.innerHTML = '<p class="status">No apps are available.</p>';
     return;
   }
 
-  for (const game of games) {
-    const card = document.createElement(game.available === false ? "article" : "a");
-    card.className = "game-card";
-    if (game.available === false) {
+  for (const app of apps) {
+    const card = document.createElement(app.available === false ? "article" : "a");
+    card.className = "app-card";
+    if (app.available === false) {
       card.classList.add("unavailable");
       card.setAttribute("aria-disabled", "true");
     } else {
-      card.href = `/games/${encodeURIComponent(game.id)}`;
+      card.href = `/apps/${encodeURIComponent(app.id)}`;
     }
 
     const title = document.createElement("h2");
-    title.textContent = game.title;
+    title.textContent = app.title;
 
     const description = document.createElement("p");
-    description.textContent = game.description;
+    description.textContent = app.description;
 
     const capabilities = document.createElement("span");
     capabilities.className = "capabilities";
     capabilities.textContent =
-      game.available === false
+      app.available === false
         ? "Unavailable"
-        : (game.capabilities || []).join(" + ");
+        : (app.capabilities || []).join(" + ");
 
     card.append(title, description, capabilities);
-    gameList.append(card);
+    appList.append(card);
   }
 }
 
-async function loadGames() {
+async function loadApps() {
   try {
-    const response = await fetch("/api/games");
-    if (!response.ok) throw new Error(`Game list returned ${response.status}`);
-    renderGames(await response.json());
+    const response = await fetch("/api/apps");
+    if (!response.ok) throw new Error(`App list returned ${response.status}`);
+    renderApps(await response.json());
   } catch (error) {
-    console.error("Could not load games", error);
-    gameList.innerHTML =
-      '<p class="status error">Could not load the game list. Please refresh.</p>';
+    console.error("Could not load apps", error);
+    appList.innerHTML =
+      '<p class="status error">Could not load the app list. Please refresh.</p>';
   }
 }
 
 initializeUserSelector(userSelector);
-loadGames();
+loadApps();

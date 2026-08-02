@@ -73,13 +73,13 @@ h1 {
   font-size: 1.1rem;
 }
 
-.game-list {
+.app-list {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(18rem, 100%), 1fr));
   gap: 1rem;
 }
 
-.game-card {
+.app-card {
   display: flex;
   min-height: 12rem;
   flex-direction: column;
@@ -92,29 +92,29 @@ h1 {
   transition: border-color 150ms ease, transform 150ms ease;
 }
 
-.game-card:hover,
-.game-card:focus-visible {
+.app-card:hover,
+.app-card:focus-visible {
   border-color: #60a5fa;
   outline: none;
   transform: translateY(-2px);
 }
 
-.game-card.unavailable {
+.app-card.unavailable {
   cursor: not-allowed;
   opacity: 0.55;
 }
 
-.game-card.unavailable:hover {
+.app-card.unavailable:hover {
   border-color: #334155;
   transform: none;
 }
 
-.game-card h2 {
+.app-card h2 {
   margin: 0;
   font-size: 1.5rem;
 }
 
-.game-card p {
+.app-card p {
   flex: 1;
   color: #cbd5e1;
 }

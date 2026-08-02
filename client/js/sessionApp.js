@@ -13,7 +13,7 @@ const elements = {
   audioButton: document.getElementById("muteAudioBtn"),
   celebration: document.getElementById("celebration"),
   connectionStatus: document.getElementById("connectionStatus"),
-  gamesLink: document.getElementById("gamesLink"),
+  appsLink: document.getElementById("appsLink"),
   localVideo: document.getElementById("localVideo"),
   minimizeVideoButton: document.getElementById("minimizeVideoBtn"),
   statusText: document.getElementById("statusText"),
@@ -30,15 +30,15 @@ function setStatus(message, state = "connected") {
   elements.connectionStatus.dataset.state = state;
 }
 
-function selectedGameId() {
-  const match = window.location.pathname.match(/^\/games\/([a-z][a-z0-9-]*)\/?$/);
+function selectedAppId() {
+  const match = window.location.pathname.match(/^\/apps\/([a-z][a-z0-9-]*)\/?$/);
   return match ? match[1] : null;
 }
 
-async function loadClientConfig(gameId) {
+async function loadClientConfig(appId) {
   try {
     const response = await fetch(
-      gameId ? `/api/games/${encodeURIComponent(gameId)}` : "/client-config",
+      appId ? `/api/apps/${encodeURIComponent(appId)}` : "/client-config",
     );
     if (!response.ok) return {};
     const config = await response.json();
@@ -75,8 +75,8 @@ function onServerEvent(type, handler) {
 
 onServerEvent("transcript", (message) => transcriptView.append(message));
 onServerEvent(
-  "game_feedback",
-  (message) => interactions.handleGameFeedback(message),
+  "app_feedback",
+  (message) => interactions.handleAppFeedback(message),
 );
 
 function loadStylesheet(url) {
@@ -150,12 +150,12 @@ createMediaControls({
 });
 
 (async () => {
-  const gameId = selectedGameId();
-  if (gameId) {
-    elements.gamesLink.hidden = false;
+  const appId = selectedAppId();
+  if (appId) {
+    elements.appsLink.hidden = false;
   }
   const [config, userId] = await Promise.all([
-    loadClientConfig(gameId),
+    loadClientConfig(appId),
     initializeUserSelector(elements.userSelector, { reloadOnChange: true }),
   ]);
   if (
@@ -167,8 +167,8 @@ createMediaControls({
   await loadAppUI(config);
   setStatus("Connecting…", "connecting");
   try {
-    const offerPath = gameId
-      ? `/games/${encodeURIComponent(gameId)}/offer`
+    const offerPath = appId
+      ? `/apps/${encodeURIComponent(appId)}/offer`
       : "/offer";
     const offerUrl = userId
       ? `${offerPath}?user_id=${encodeURIComponent(userId)}`

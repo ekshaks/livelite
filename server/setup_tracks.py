@@ -143,6 +143,22 @@ def pc_session_setup(run_session, config, on_peer_close=None):
     session_task = asyncio.create_task(run_session(session))
     pc.session_context = session
     pc.session_task = session_task
+
+    def on_session_done(task):
+        if task.cancelled():
+            return
+        exception = task.exception()
+        if exception is None:
+            return
+        print(f"Session task failed: {type(exception).__name__}: {exception}")
+        stop_event.set()
+        session.closed.set()
+        if on_peer_close is not None:
+            on_peer_close(pc)
+        if pc.connectionState != "closed":
+            main_loop.create_task(pc.close())
+
+    session_task.add_done_callback(on_session_done)
     
     def on_track(track: MediaStreamTrack):
         print(f"Track received: {track.kind}")
