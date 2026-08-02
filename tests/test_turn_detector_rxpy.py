@@ -1,4 +1,4 @@
-import time
+import asyncio
 import unittest
 
 import numpy as np
@@ -8,8 +8,11 @@ from server.core.events import SpeechEvent
 from server.core.stream_dsl import Stream, SubGroup, turn_detector
 
 
-class TurnDetectorTests(unittest.TestCase):
-    def test_named_outputs_share_one_audio_subscription_and_dispose(self):
+class TurnDetectorTests(unittest.IsolatedAsyncioTestCase):
+    """The VAD poll timer is scheduled on the asyncio loop, so these tests
+    subscribe and wait inside a running loop."""
+
+    async def test_named_outputs_share_one_audio_subscription_and_dispose(self):
         audio = Subject()
         turn = Stream.source(audio) | turn_detector(
             is_speech_fn=lambda _chunk: True,
@@ -31,7 +34,7 @@ class TurnDetectorTests(unittest.TestCase):
 
         self.assertEqual(len(audio.observers), 1)
         audio.on_next(np.array([1, 2, 3], dtype=np.int16))
-        time.sleep(0.04)
+        await asyncio.sleep(0.04)
 
         self.assertEqual(signals, [SpeechEvent.SPEECH_START, SpeechEvent.SPEECH_END])
         self.assertEqual(len(segments), 1)
@@ -45,7 +48,7 @@ class TurnDetectorTests(unittest.TestCase):
         signal_sub.dispose()
         self.assertEqual(len(audio.observers), 0)
 
-    def test_completion_flushes_buffered_speech(self):
+    async def test_completion_flushes_buffered_speech(self):
         audio = Subject()
         turn = Stream.source(audio) | turn_detector(
             is_speech_fn=lambda _chunk: True,
@@ -71,6 +74,20 @@ class TurnDetectorTests(unittest.TestCase):
         self.assertEqual(completed, [True])
         self.assertEqual(len(audio.observers), 0)
         subs.dispose()
+
+    async def test_subscribe_requires_running_loop(self):
+        audio = Subject()
+        observable = Stream.source(audio) | turn_detector(
+            is_speech_fn=lambda _chunk: True,
+        )
+
+        def subscribe_without_loop():
+            with self.assertRaisesRegex(RuntimeError, "running asyncio"):
+                observable.segments.to(
+                    lambda obs: obs.subscribe(lambda _item: None),
+                )
+
+        await asyncio.to_thread(subscribe_without_loop)
 
 
 if __name__ == "__main__":

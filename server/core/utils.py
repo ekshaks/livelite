@@ -1,15 +1,9 @@
 import asyncio
-import reactivex as rx
-from reactivex.subject import Subject as rx_Subject
-from reactivex import Observable as rx_Observable, interval as rx_interval
-from reactivex import operators as rx_ops
-from reactivex.scheduler.eventloop import AsyncIOScheduler
-
-import time
-
-import time
 import functools
-import asyncio
+import time
+
+from reactivex.scheduler.eventloop import AsyncIOScheduler
+from reactivex.subject import Subject as rx_Subject  # re-exported for the servers
 
 from .logging_utils import monitor_time
 
