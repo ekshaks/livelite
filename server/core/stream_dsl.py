@@ -1,17 +1,15 @@
 import asyncio
-import json
 import time
 import wave
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Optional
 
 import numpy as np
 import reactivex
 from reactivex import operators as ops
 from reactivex.disposable import CompositeDisposable
 
-from .events import TranscriptEvent
 from .logging_utils import monitor_log
 
 
@@ -290,10 +288,11 @@ def async_map_stage(func, name: str = "async_stage", concurrency: str = "serial"
     - ``latest`` cancels stale work when a newer item arrives.
     - ``drop`` ignores new items while one operation is active.
 
-    The current asyncio loop is captured when the stage is built. Inputs may
-    arrive from another thread (for example, the VAD timer), so coroutine work
-    is scheduled onto that loop safely. The output is shared so multiple sinks
-    reuse one async execution rather than invoking ``func`` once per sink.
+    The current asyncio loop is captured when the stage is built. All pipeline
+    callbacks run on that loop (sources and the VAD timer are loop-scheduled),
+    so each coroutine becomes a plain task on it. The output is shared so
+    multiple sinks reuse one async execution rather than invoking ``func``
+    once per sink.
     Disposing the final subscription cancels active futures; ``on_dispose``
     optionally releases provider resources such as a model executor.
     """
@@ -307,15 +306,7 @@ def async_map_stage(func, name: str = "async_stage", concurrency: str = "serial"
 
         def async_observable(item):
             def future_factory(_scheduler=None):
-                coroutine = func(item)
-                try:
-                    if asyncio.get_running_loop() is loop:
-                        future = loop.create_task(coroutine)
-                    else:
-                        future = asyncio.run_coroutine_threadsafe(coroutine, loop)
-                except RuntimeError:
-                    future = asyncio.run_coroutine_threadsafe(coroutine, loop)
-                return reactivex.from_future(future)
+                return reactivex.from_future(loop.create_task(func(item)))
 
             return reactivex.defer(future_factory)
 
@@ -343,21 +334,14 @@ def print_sink(prefix: str = ""):
     return attach
 
 
-def client_message_sink(data_channels: Dict[str, Any], loop, channel: str = "server_text"):
+def client_message_sink(session, channel: str = "server_text"):
+    """Sink that forwards each stream item to the browser data channel."""
+
     def attach(observable):
         def on_next(message):
-            # Data channel sends must hop back to the WebRTC event loop.
-            message_type = type(message).__name__
-            monitor_log(f"sending {message_type} to client")
+            monitor_log(f"sending {type(message).__name__} to client")
             try:
-                data_channel = data_channels.get(channel)
-                if data_channel and data_channel.readyState == "open":
-                    if not hasattr(message, "to_client_dict"):
-                        raise TypeError(
-                            f"{message_type} must implement to_client_dict()"
-                        )
-                    data = json.dumps(message.to_client_dict())
-                    loop.call_soon_threadsafe(lambda: data_channel.send(data))
+                session.send_to_client(message, channel=channel)
             except Exception as exc:
                 print(f"Error sending client message: {exc}")
 

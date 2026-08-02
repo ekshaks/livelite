@@ -10,7 +10,7 @@ def _text_log_sink(title, max_chars=1600):
     return attach
 
 
-def add_text_sinks(stream, data_channels, loop, role, subs, log_title=None, max_log_chars=1600):
+def add_text_sinks(stream, session, role, subs, log_title=None, max_log_chars=1600):
     title = log_title or ("ASSISTANT WRITTEN RESPONSE" if role == "assistant" else "USER MESSAGE")
     if role != "assistant":
         stream.to(_text_log_sink(title, max_chars=max_log_chars), name=f"log_{role}_text", subs=subs)
@@ -19,7 +19,7 @@ def add_text_sinks(stream, data_channels, loop, role, subs, log_title=None, max_
         name=f"{role}_client_message",
     )
     client_messages.to(
-        client_message_sink(data_channels, loop),
+        client_message_sink(session),
         name=f"client_{role}_message",
         subs=subs,
     )

@@ -1,10 +1,11 @@
+import asyncio
+
 import numpy as np
 import reactivex
-from reactivex import operators as ops
 from reactivex.disposable import CompositeDisposable, Disposable
+from reactivex.scheduler.eventloop import AsyncIOScheduler
 import time
 import torch
-import threading
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Tuple
 
@@ -76,35 +77,42 @@ def turn_detector_vad(
     )
 
     def subscribe(observer, scheduler=None):
+        # The silence-poll timer runs on the asyncio event loop, so every
+        # callback below (audio on_next, timer tick, dispose) is serialized on
+        # one loop and no locking is needed. Audio sources must also emit on
+        # this loop.
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            raise RuntimeError(
+                "turn_detector_vad must be subscribed from a running asyncio "
+                "event loop; its poll timer is scheduled on that loop."
+            ) from None
+
         buffer = []
         last_speech_time = [0.0]
-        lock = threading.RLock()
-        disposed = threading.Event()
+        disposed = [False]
 
         def process_chunk(chunk: np.ndarray):
-            if disposed.is_set():
+            if disposed[0]:
                 return
-            with lock:
-                if is_speech(chunk):
-                    if not buffer:
-                        print("[interrupt] VAD SPEECH_START")
-                        observer.on_next(VadEmission(signal=SpeechEvent.SPEECH_START))
-                    buffer.append(chunk)
-                    last_speech_time[0] = time.monotonic()
+            if is_speech(chunk):
+                if not buffer:
+                    print("[interrupt] VAD SPEECH_START")
+                    observer.on_next(VadEmission(signal=SpeechEvent.SPEECH_START))
+                buffer.append(chunk)
+                last_speech_time[0] = time.monotonic()
 
         def emit_segment_if_ready(force: bool = False):
-            if disposed.is_set():
+            if disposed[0] or not buffer:
                 return
-            with lock:
-                if not buffer:
-                    return
-                if not force and (time.monotonic() - last_speech_time[0]) < silence_timeout:
-                    return
-                print("[interrupt] VAD SPEECH_END")
-                observer.on_next(VadEmission(signal=SpeechEvent.SPEECH_END))
-                segment = np.concatenate(buffer, axis=0)
-                buffer.clear()
-                observer.on_next(VadEmission(segment=segment))
+            if not force and (time.monotonic() - last_speech_time[0]) < silence_timeout:
+                return
+            print("[interrupt] VAD SPEECH_END")
+            observer.on_next(VadEmission(signal=SpeechEvent.SPEECH_END))
+            segment = np.concatenate(buffer, axis=0)
+            buffer.clear()
+            observer.on_next(VadEmission(segment=segment))
 
         def on_completed():
             emit_segment_if_ready(force=True)
@@ -115,49 +123,13 @@ def turn_detector_vad(
             on_error=observer.on_error,
             on_completed=on_completed,
         )
-        timer_sub = reactivex.interval(poll_interval).subscribe(
-            lambda _: emit_segment_if_ready()
-        )
+        timer_sub = reactivex.interval(
+            poll_interval, scheduler=AsyncIOScheduler(loop)
+        ).subscribe(lambda _: emit_segment_if_ready())
 
         def dispose():
-            disposed.set()
+            disposed[0] = True
 
         return CompositeDisposable(source_sub, timer_sub, Disposable(dispose))
 
     return reactivex.create(subscribe)
-
-
-def test():
-    """Example usage with proper resource cleanup."""
-    from mic import AudioGenerator
-    from .stt.whisper import WhisperSTT
-    audio_gen = AudioGenerator()
-    from reactivex.subject import Subject
-
-    turn_input = Subject()
-    events = turn_detector_vad(turn_input)
-    turn_output = events.pipe(
-        ops.filter(lambda event: event.segment is not None),
-        ops.map(lambda event: event.segment),
-    )
-    stt = WhisperSTT()
-    
-    def print_transcription(segment):
-        text = stt(segment)
-        if text.strip():
-            print(f"Transcription: {text}")
-    
-    try:
-        audio_stream = audio_gen()
-        audio_stream.subscribe(turn_input)
-        turn_output.subscribe(print_transcription)
-        
-        while True:
-            time.sleep(0.1)
-    except KeyboardInterrupt:
-        print("\nStopping...")
-    finally:
-        audio_gen.close()
-
-if __name__ == "__main__":
-    test()
