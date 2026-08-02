@@ -1,6 +1,8 @@
+import asyncio
+import base64
+
 import cv2
 import numpy as np
-import base64
 
 def make_dummy_jpeg_base64(width=640, height=480, color=(0, 255, 0)):
     """

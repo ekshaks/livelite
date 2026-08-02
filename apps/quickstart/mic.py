@@ -18,6 +18,7 @@ from server.core.tts_providers import KokoroFastApiTTSProvider, PlaybackState, t
 
 
 async def run_mic_pipeline(args):
+    loop = asyncio.get_running_loop()
     audio_input = Subject()
     subs = SubGroup()
     playback_state = PlaybackState() if args.tts else None
@@ -68,7 +69,9 @@ async def run_mic_pipeline(args):
         if playback_state is not None and not args.allow_interruptions and playback_state.is_playing():
             return
         samples = indata[:, 0].copy()
-        audio_input.on_next(samples)
+        # PortAudio invokes this callback on its own audio thread; hand the
+        # samples to the event loop so the whole pipeline stays loop-side.
+        loop.call_soon_threadsafe(audio_input.on_next, samples)
 
     async def keyboard_controls():
         while not stop_event.is_set():

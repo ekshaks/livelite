@@ -30,10 +30,8 @@ async def run_multimodal_session(
     await session.wait_until_ready()
 
     pc = session.pc
-    data_channels = session.data_channels
     audio_input = session.audio_input
     video_input = session.video_input
-    main_loop = session.main_loop
     subs = SubGroup()
     latest_frame = None
 
@@ -66,8 +64,8 @@ async def run_multimodal_session(
     assistant_written = assistant_parts | map_items(lambda part: part["written"], name="assistant_written")
     assistant_written = assistant_written | filter_items(lambda text: bool(text and text.strip()), name="non_empty_written")
 
-    add_text_sinks(user_text, data_channels, main_loop, role="user", subs=subs)
-    add_text_sinks(assistant_written, data_channels, main_loop, role="assistant", subs=subs)
+    add_text_sinks(user_text, session, role="user", subs=subs)
+    add_text_sinks(assistant_written, session, role="assistant", subs=subs)
     add_kokoro_tts(assistant_spoken, pc, turn.signals, subs=subs, mode=tts_mode)
 
     try:
