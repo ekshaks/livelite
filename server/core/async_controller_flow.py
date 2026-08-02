@@ -97,10 +97,11 @@ class AsyncControllerFlow:
             if not self._started or self._loop is None or self._event_queue is None:
                 self._pending_events.append(item)
                 return True
-            loop = self._loop
             queue = self._event_queue
 
-        loop.call_soon_threadsafe(queue.put_nowait, item)
+        # All producers (stream sinks, effect callbacks) run on the event
+        # loop, so the queue can be fed directly.
+        queue.put_nowait(item)
         return True
 
     def start(self) -> None:

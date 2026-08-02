@@ -4,7 +4,6 @@ import asyncio
 import time
 
 import numpy as np
-from reactivex import operators as ops
 
 from ..events import TranscriptEvent
 from ..logging_utils import monitor_time
@@ -113,16 +112,16 @@ def whisper_stt(
 
         return async_map_stage(transcribe, name=name, on_dispose=mlx_stt.shutdown)
 
+    from ..stream_dsl import _dump_stt_audio, async_map_stage
+
     stt = WhisperSTT(mode=mode, model_size=model_size, **kwargs)
 
-    def apply(stream):
-        def transcribe(segment):
-            if debug_audio_dir:
-                from ..stream_dsl import _dump_stt_audio
+    async def transcribe(segment):
+        # Whisper inference is blocking; run it off the event loop so audio
+        # receive and WebRTC pacing keep running during transcription.
+        if debug_audio_dir:
+            _dump_stt_audio(segment, debug_audio_dir)
+        text = await asyncio.to_thread(stt, segment)
+        return TranscriptEvent(text=text or "", is_final=True)
 
-                _dump_stt_audio(segment, debug_audio_dir)
-            return TranscriptEvent(text=stt(segment) or "", is_final=True)
-
-        return stream.pipe(ops.map(transcribe), name=name)
-
-    return apply
+    return async_map_stage(transcribe, name=name)
