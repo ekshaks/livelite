@@ -26,11 +26,11 @@ export function createInteractions(celebration) {
     }, 1800);
   }
 
-  function handleGameFeedback(message) {
+  function handleAppFeedback(message) {
     if (message.name === "answer_evaluated" && message.result === "correct") {
       showCelebration();
     }
   }
 
-  return { handleGameFeedback, showCelebration };
+  return { handleAppFeedback, showCelebration };
 }

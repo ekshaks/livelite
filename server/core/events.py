@@ -32,14 +32,14 @@ class ClientTranscriptMessage:
 
 
 @dataclass(frozen=True)
-class GameFeedback:
+class AppFeedback:
     name: str
     result: str
     data: dict[str, Any] = field(default_factory=dict)
 
     def to_client_dict(self) -> dict[str, Any]:
         return {
-            "type": "game_feedback",
+            "type": "app_feedback",
             "name": self.name,
             "result": self.result,
             "data": self.data,
