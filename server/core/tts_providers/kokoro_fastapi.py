@@ -2,7 +2,7 @@ import asyncio
 import time
 from typing import Any, Optional
 
-from ..logging_utils import monitor_time
+from ..logging_utils import monitor_log, monitor_time
 
 KOKORO_PCM_SAMPLE_RATE = 24000
 
@@ -36,6 +36,7 @@ async def _tts_kokoro_stream_chunks(text, interrupt_event, on_audio_block):
     chunk_count = 0
 
     try:
+        monitor_log("tts provider=kokoro event=request_start")
         client = AsyncOpenAI(base_url="http://localhost:8880/v1", api_key="not-needed")
         async with client.audio.speech.with_streaming_response.create(
             model="kokoro",
@@ -48,7 +49,7 @@ async def _tts_kokoro_stream_chunks(text, interrupt_event, on_audio_block):
                 if first_chunk:
                     timings["first_buffer_received"] = time.perf_counter()
                     first_chunk = False
-                    print("[interrupt] kokoro first chunk")
+                    monitor_log("[interrupt] kokoro event=first_chunk")
                 if interrupt_event.is_set():
                     print("[interrupt] kokoro break on interrupt")
                     break
@@ -87,7 +88,13 @@ async def tts_kokoro_stream_async(text, interrupt_event):
 async def tts_kokoro_to_track_async(text, interrupt_event, audio_track):
     """Stream Kokoro-FastAPI PCM into an outbound WebRTC audio track."""
 
+    first_track_write = True
+
     async def write_track(audio_block, samplerate):
+        nonlocal first_track_write
+        if first_track_write:
+            first_track_write = False
+            monitor_log("tts provider=kokoro event=first_pcm_to_webrtc_track")
         await audio_track.write_pcm(audio_block, sample_rate=samplerate)
 
     await _tts_kokoro_stream_chunks(text, interrupt_event, write_track)
