@@ -25,9 +25,32 @@ const elements = {
   workspace: document.querySelector(".workspace"),
 };
 
+const reloadButton = document.createElement("button");
+reloadButton.className = "connection-reload";
+reloadButton.type = "button";
+reloadButton.textContent = "Reload";
+reloadButton.hidden = true;
+reloadButton.addEventListener("click", () => window.location.reload());
+elements.connectionStatus.appendChild(reloadButton);
+
 function setStatus(message, state = "connected") {
   elements.statusText.textContent = message;
   elements.connectionStatus.dataset.state = state;
+  reloadButton.hidden = state !== "closed";
+}
+
+function handleConnectionState(state) {
+  if (state === "connected") {
+    setStatus("Connected", "connected");
+    return;
+  }
+  if (state === "connecting") {
+    setStatus("Connecting…", "connecting");
+    return;
+  }
+  if (state === "disconnected" || state === "failed" || state === "closed") {
+    setStatus("Connection closed. Please reload to continue.", "closed");
+  }
 }
 
 function selectedAppId() {
@@ -174,7 +197,7 @@ createMediaControls({
     const offerUrl = userId
       ? `${offerPath}?user_id=${encodeURIComponent(userId)}`
       : offerPath;
-    await TrackManager.initConnection(onDataMessage, offerUrl);
+    await TrackManager.initConnection(onDataMessage, offerUrl, handleConnectionState);
     setStatus("Connected", "connected");
   } catch (error) {
     console.error("Connection failed", error);

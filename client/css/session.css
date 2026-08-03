@@ -119,6 +119,26 @@ button { font: inherit; }
   color: var(--danger);
 }
 
+.connection-status[data-state="closed"] {
+  color: var(--danger);
+}
+
+.connection-reload {
+  margin-left: 4px;
+  padding: 5px 9px;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  background: transparent;
+  color: inherit;
+  font-size: .78rem;
+  font-weight: 800;
+}
+
+.connection-reload:hover,
+.connection-reload:focus-visible {
+  background: rgba(255, 180, 171, .14);
+}
+
 #statusText {
   overflow: hidden;
   text-overflow: ellipsis;
