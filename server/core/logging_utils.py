@@ -1,4 +1,9 @@
 import sys
+from datetime import datetime, timezone
+
+
+def _timestamp() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="milliseconds")
 
 
 def clip_text(text, max_chars=1600):
@@ -17,7 +22,7 @@ def log_text_block(title, text, max_chars=1600):
 
 
 def monitor_log(message):
-    print(f"[monitor] {message}")
+    print(f"[monitor] ts={_timestamp()} {message}")
 
 
 def monitor_time(service, operation, elapsed_s, **fields):
@@ -31,4 +36,4 @@ def monitor_time(service, operation, elapsed_s, **fields):
         f"operation={operation}",
         *(f"{key}={value}" for key, value in fields.items() if value is not None),
     ]
-    print(f"[monitor-time] {' '.join(details)}")
+    print(f"[monitor-time] ts={_timestamp()} {' '.join(details)}")

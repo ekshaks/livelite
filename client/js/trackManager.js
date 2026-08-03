@@ -48,11 +48,13 @@ export const TrackManager = {
 
     this.pc.ontrack = (event) => {
       if (event.track.kind !== "audio") return;
-      console.log("Remote assistant audio track received");
+      console.log("[audio] ts=" + new Date().toISOString() + " event=remote_track_received");
       const stream = event.streams[0] || new MediaStream([event.track]);
       const audioEl = this.ensureRemoteAudioElement();
       audioEl.srcObject = stream;
-      audioEl.play().catch((err) => {
+      audioEl.play().then(() => {
+        console.log("[audio] ts=" + new Date().toISOString() + " event=remote_audio_playing");
+      }).catch((err) => {
         console.warn("Remote audio autoplay blocked:", err);
       });
     };

@@ -5,7 +5,7 @@ from typing import Any, Optional, Protocol
 
 from reactivex.disposable import CompositeDisposable, Disposable
 
-from ..logging_utils import monitor_time
+from ..logging_utils import monitor_log, monitor_time
 
 
 class TTSProvider(Protocol):
@@ -82,7 +82,7 @@ def tts_sink(
                     try:
                         if state is not None:
                             state.set_playing(True)
-                        print(f"[interrupt] {name} speak start")
+                        monitor_log(f"[interrupt] {name} event=speak_start")
                         started_at = time.perf_counter()
                         try:
                             await provider.speak(text, interrupt_event)
@@ -94,7 +94,10 @@ def tts_sink(
                                 provider=type(provider).__name__,
                                 interrupted=interrupt_event.is_set(),
                             )
-                        print(f"[interrupt] {name} speak end interrupted={interrupt_event.is_set()}")
+                        monitor_log(
+                            f"[interrupt] {name} event=speak_end "
+                            f"interrupted={interrupt_event.is_set()}"
+                        )
                     except asyncio.CancelledError:
                         raise
                     except Exception as exc:
