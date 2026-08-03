@@ -63,3 +63,7 @@ Use deterministic controller logic for scoring and state transitions. Use LLM/VL
 
 - **Kokoro** (default) — local ONNX model via OpenAI-compatible API (`localhost:8880`). Start with `Kokoro-FastAPI/`.
 - **Gemini TTS** — cloud, via `google-genai`.
+
+
+## Misc Install
+- Kokoro: change pytorch cpu version in pyproject.toml to the one the matches pre-installed (ALbertModel error)

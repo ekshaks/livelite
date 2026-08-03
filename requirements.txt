@@ -3,6 +3,7 @@ pyaudio
 asyncio
 reactivex
 agno
+openai
 groq
 torch
 faster-whisper
