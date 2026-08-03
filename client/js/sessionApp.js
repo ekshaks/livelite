@@ -118,6 +118,7 @@ async function loadAppUI(config) {
       }),
       interactionRoot: elements.celebration,
       showCelebration: interactions.showCelebration,
+      muteMicrophone: () => TrackManager.muteAudio(),
       onServerEvent,
       sendUICommand: (message) => TrackManager.sendData(message),
       uiApiVersion: UI_API_VERSION,
