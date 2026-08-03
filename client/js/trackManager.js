@@ -13,12 +13,14 @@ export const TrackManager = {
   remoteAudioEl: null,
 
   onDataMessage: null, // callback
+  onConnectionStateChange: null,
 
 // Inside initConnection
 
-  async initConnection(onDataMessage=null, offerUrl="/offer") {
+  async initConnection(onDataMessage=null, offerUrl="/offer", onConnectionStateChange=null) {
     this.pc = new RTCPeerConnection();
     this.onDataMessage = onDataMessage;
+    this.onConnectionStateChange = onConnectionStateChange;
 
     // reserve lanes for audio + video in SDP
     this.audioTransceiver = this.pc.addTransceiver("audio");
@@ -35,6 +37,12 @@ export const TrackManager = {
     this.pc.onicecandidate = (event) => {
       if (event.candidate) {
         //console.log("ICE candidate:", event.candidate);
+      }
+    };
+
+    this.pc.onconnectionstatechange = () => {
+      if (this.onConnectionStateChange) {
+        this.onConnectionStateChange(this.pc.connectionState);
       }
     };
 
@@ -99,6 +107,11 @@ export const TrackManager = {
 
     const stream = await this.getUserMedia(constraints);
     this.videoTrack = stream.getVideoTracks()[0];
+    this.videoTrack.onended = () => {
+      if (this.onConnectionStateChange) {
+        this.onConnectionStateChange("closed");
+      }
+    };
     await this.videoTransceiver.sender.replaceTrack(this.videoTrack);
 
     // show preview
@@ -131,6 +144,11 @@ export const TrackManager = {
       }
     });
     this.audioTrack = stream.getAudioTracks()[0];
+    this.audioTrack.onended = () => {
+      if (this.onConnectionStateChange) {
+        this.onConnectionStateChange("closed");
+      }
+    };
     await this.audioTransceiver.sender.replaceTrack(this.audioTrack);
   },
 
