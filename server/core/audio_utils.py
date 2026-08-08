@@ -35,14 +35,22 @@ def estimate_pitch(y, sr):
 
 
 def is_active_speaker(chunk, sr, rms_thresh=0.05, centroid_thresh=2000, pitch_threshold=165, debug=True, filter_gender=None):
-    import librosa
     """
     Quick heuristic for near vs far:
     - RMS loudness must be above rms_thresh
     - Spectral centroid must be above centroid_thresh (Hz)
     """
     # Normalize to float32 [-1, 1]
-    y = chunk.astype(np.float32) / 32768.0  
+    y = chunk.astype(np.float32) / 32768.0
+
+    # Fast path: when no gender filter and no debug metrics are wanted, the
+    # decision depends only on RMS. Plain numpy is ~100x cheaper per call
+    # than the librosa feature stack and avoids a >1 s librosa warm-up on
+    # the first chunk — significant on a 1-vCPU server.
+    if filter_gender is None and not debug:
+        return float(np.sqrt(np.mean(np.square(y)))) > rms_thresh
+
+    import librosa
 
     rms = np.mean(librosa.feature.rms(y=y))
     centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr))
