@@ -19,7 +19,11 @@ def create_tts_provider(config: TTSConfig, audio_track: Optional[Any] = None):
         mode = "webrtc" if config.output == "webrtc" else "local"
         return KokoroFastApiTTSProvider(mode=mode, audio_track=audio_track)
     if config.provider == "kokoro_onnx":
-        return KokoroOnnxTTSProvider(voice=config.voice or "af_sarah")
+        return KokoroOnnxTTSProvider(
+            voice=config.voice or "af_sarah",
+            output="webrtc" if config.output == "webrtc" else "local",
+            audio_track=audio_track,
+        )
     if config.provider == "gemini":
         return GeminiTTSProvider(
             model=config.model or "gemini-2.5-flash-preview-tts",

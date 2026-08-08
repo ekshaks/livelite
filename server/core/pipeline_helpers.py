@@ -1,8 +1,30 @@
+import re
+
 from .logging_utils import log_text_block
 from .events import ClientTranscriptMessage
-from .stream_dsl import client_message_sink, map_items
+from .stream_dsl import client_message_sink, expand_items, map_items
 from .tts_providers import KokoroFastApiTTSProvider, tts_sink
 from .tts_providers.kokoro_onnx import KokoroOnnxTTSProvider
+
+# Split after sentence/clause punctuation (plus any closing quotes/brackets)
+# followed by whitespace. Same boundary the spell app uses for its per-phrase
+# TTS requests; hoisted here so every pipeline can share it.
+SPOKEN_PHRASE_BOUNDARY = re.compile(r'(?<=[,.!?;:])(?:["\')\]]+)?\s+')
+
+
+def split_spoken_phrases(text):
+    """Split spoken text into punctuation-delimited phrases for TTS.
+
+    Non-streaming TTS providers (kokoro_onnx) synthesize a whole clip per
+    request, so first-audio latency equals the synthesis time of the first
+    phrase — short phrases keep that bounded. Returns a tuple of non-empty
+    phrases.
+    """
+    return tuple(
+        phrase.strip()
+        for phrase in SPOKEN_PHRASE_BOUNDARY.split(text or "")
+        if phrase.strip()
+    )
 
 
 def _text_log_sink(title, max_chars=1600):
@@ -77,6 +99,11 @@ def add_kokoro_tts(
         raise ValueError(f"Unknown TTS mode: {mode}")
 
     tts_provider = _make_kokoro_provider(provider, output_mode, audio_track)
+
+    if provider == "kokoro_onnx":
+        # kokoro_onnx synthesizes whole clips (no streaming), so split the
+        # text into short phrases to bound first-audio latency per request.
+        stream = stream | expand_items(split_spoken_phrases, name=f"{name_prefix}_phrase_split")
 
     name = f"{name_prefix}_{provider}_{mode}_tts"
     stream.to(
