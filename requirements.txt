@@ -13,6 +13,7 @@ torch
 faster-whisper
 google-genai
 PyYAML
+pillow
 librosa
 kokoro-onnx
 sounddevice
