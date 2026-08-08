@@ -9,6 +9,17 @@ from ..events import TranscriptEvent
 from ..logging_utils import monitor_time
 
 
+# Cache Whisper models keyed by (mode, model_size, model_id, frozen kwargs).
+# Loading a faster-whisper base int8 model takes ~1-3 s on a 1-vCPU box and
+# was previously repeated on every new browser connect because the pipeline
+# built a fresh WhisperSTT per session — the visible "hang on URL connect".
+_WHISPER_MODEL_CACHE: dict = {}
+
+
+def _cache_key(mode, model_size, model_id, kwargs):
+    return (mode, model_size, model_id, tuple(sorted(kwargs.items())))
+
+
 def get_faster_whisper_model(model_name: str = "base", compute_type: str = "int8", **kwargs):
     """Load a faster-whisper CTranslate2 model.
 
@@ -23,13 +34,33 @@ def get_faster_whisper_model(model_name: str = "base", compute_type: str = "int8
 
 
 def get_whisper_model(mode="faster_whisper", model_size: str = "base", model_id=None, **kwargs):
+    """Return a process-wide singleton Whisper model for the given config.
+
+    Second and later callers with the same (mode, model_size, model_id, kwargs)
+    share the same underlying model handle, so multiple WebRTC sessions do
+    not each reload the weights.
+    """
+    key = _cache_key(mode, model_size, model_id, kwargs)
+    cached = _WHISPER_MODEL_CACHE.get(key)
+    if cached is not None:
+        return cached
     if mode == "faster_whisper":
-        return get_faster_whisper_model(model_size, **kwargs)
-    if mode == "mlx":
+        model = get_faster_whisper_model(model_size, **kwargs)
+    elif mode == "mlx":
         from .mlx import get_mlx_whisper_model
 
-        return get_mlx_whisper_model(model_size=model_size, model_id=model_id)
-    raise ValueError(f"Unknown Whisper mode: {mode}")
+        model = get_mlx_whisper_model(model_size=model_size, model_id=model_id)
+    else:
+        raise ValueError(f"Unknown Whisper mode: {mode}")
+    _WHISPER_MODEL_CACHE[key] = model
+    return model
+
+
+def warm_up(mode: str = "faster_whisper", model_size: str = "base", **kwargs) -> None:
+    """Preload the Whisper model so the first session doesn't pay for it."""
+    started = time.perf_counter()
+    get_whisper_model(mode, model_size, **kwargs)
+    print(f"Whisper ({mode}/{model_size}) warmed up in {time.perf_counter() - started:.2f} s")
 
 
 def infer_faster_whisper(audio_data, model, language="en"):
