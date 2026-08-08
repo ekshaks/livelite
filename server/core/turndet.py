@@ -1,11 +1,11 @@
 import asyncio
+import os
 
 import numpy as np
 import reactivex
 from reactivex.disposable import CompositeDisposable, Disposable
 from reactivex.scheduler.eventloop import AsyncIOScheduler
 import time
-import torch
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Tuple
 
@@ -16,12 +16,44 @@ _VAD_MODEL = None
 _VAD_UTILS = None
 
 
+def _load_silero_torch():
+    """Load Silero VAD via torch.hub. Same shape it has always returned."""
+    import torch  # imported lazily so the onnx backend can skip the torch dep
+
+    return torch.hub.load("snakers4/silero-vad", "silero_vad", trust_repo=True)
+
+
+def _load_silero_onnx():
+    """Load Silero VAD via the silero-vad PyPI package with the ONNX runtime.
+
+    Returns (model, utils) where utils[0] is get_speech_timestamps so the
+    call sites do not need to know which backend they are talking to.
+    """
+    from silero_vad import get_speech_timestamps, load_silero_vad
+
+    model = load_silero_vad(onnx=True)
+    # Match the (model, utils_tuple) shape torch.hub returns; only utils[0]
+    # is consumed by _build_is_speech.
+    return model, (get_speech_timestamps,)
+
+
 def get_vad_model() -> Tuple[Any, Any]:
-    """Get or create singleton instances of VAD model and utils."""
+    """Return (model, utils) for the Silero VAD backend.
+
+    Backend selection: env ``SILERO_BACKEND`` = ``torch`` (default) | ``onnx``.
+    ONNX drops the ~1.5 GB torch install and shaves ~200-400 MB RAM, which
+    matters on a 2 GB AWS server. Desktop keeps the torch backend.
+    """
     global _VAD_MODEL, _VAD_UTILS
     if _VAD_MODEL is None or _VAD_UTILS is None:
-        print("Loading Silero VAD model...")
-        _VAD_MODEL, _VAD_UTILS = torch.hub.load('snakers4/silero-vad', 'silero_vad', trust_repo=True)
+        backend = os.environ.get("SILERO_BACKEND", "torch").lower()
+        print(f"Loading Silero VAD model (backend={backend})...")
+        if backend == "onnx":
+            _VAD_MODEL, _VAD_UTILS = _load_silero_onnx()
+        elif backend == "torch":
+            _VAD_MODEL, _VAD_UTILS = _load_silero_torch()
+        else:
+            raise ValueError(f"Unknown SILERO_BACKEND: {backend!r} (expected 'torch' or 'onnx')")
     return _VAD_MODEL, _VAD_UTILS
 
 
