@@ -1,9 +1,22 @@
+"""In-process Kokoro TTS backed by the ONNX runtime.
+
+Two output modes:
+
+* ``local``   — plays the synthesized audio on the server speaker via
+  ``sounddevice``. Same as before; used on desktop.
+* ``webrtc``  — writes 20 ms PCM blocks into an outbound WebRTC audio track
+  so a browser client hears the audio. Preferred on headless servers.
+"""
+
 import asyncio
 import time
 import warnings
 from pathlib import Path
+from typing import Any, Optional
 
-from ..logging_utils import monitor_time
+import numpy as np
+
+from ..logging_utils import monitor_log, monitor_time
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -31,6 +44,7 @@ def get_kokoro():
 
 
 async def _create_kokoro_audio(text, voice="af_sarah", speed=1.0, lang="en-us"):
+    """Synthesize ``text`` to a (samples, sample_rate) pair off the event loop."""
     loop = asyncio.get_event_loop()
     started_at = time.perf_counter()
     audio = await loop.run_in_executor(
@@ -47,7 +61,16 @@ async def _create_kokoro_audio(text, voice="af_sarah", speed=1.0, lang="en-us"):
     return audio
 
 
-async def _play_kokoro_audio(text, interrupt_event, voice="af_sarah", speed=1.0, lang="en-us"):
+def _to_pcm16(samples):
+    """Convert kokoro-onnx float32 samples in [-1, 1] to int16 PCM."""
+    if samples.dtype == np.int16:
+        return samples
+    clipped = np.clip(samples, -1.0, 1.0)
+    return (clipped * 32767).astype(np.int16)
+
+
+async def _play_kokoro_local(text, interrupt_event, voice, speed, lang):
+    """Play a synthesized clip on the server's default output device."""
     import sounddevice as sd
 
     samples, sr = await _create_kokoro_audio(text, voice=voice, speed=speed, lang=lang)
@@ -57,16 +80,86 @@ async def _play_kokoro_audio(text, interrupt_event, voice="af_sarah", speed=1.0,
         if interrupt_event.is_set():
             sd.stop()
             break
-        await loop.run_in_executor(None, lambda chunk=samples[start : start + chunk_size]: sd.play(chunk, sr, blocking=True))
+        chunk = samples[start : start + chunk_size]
+        await loop.run_in_executor(None, lambda chunk=chunk: sd.play(chunk, sr, blocking=True))
+
+
+async def _stream_kokoro_to_track(text, interrupt_event, audio_track, voice, speed, lang):
+    """Synthesize ``text`` and push int16 PCM into the outbound WebRTC track.
+
+    ``kokoro_onnx.Kokoro.create`` is not streaming, so first-audio latency is
+    the whole-clip synthesis time. Keep each utterance short (single sentence
+    or two) upstream to bound perceived latency.
+    """
+    samples, sr = await _create_kokoro_audio(text, voice=voice, speed=speed, lang=lang)
+    if interrupt_event.is_set() or len(samples) == 0:
+        return
+    pcm = _to_pcm16(samples)
+    frame_samples = max(1, int(sr * 0.02))  # 20 ms frames — the aiortc default
+    first_write_at = None
+    started_at = time.perf_counter()
+    for start in range(0, len(pcm), frame_samples):
+        if interrupt_event.is_set():
+            monitor_log("tts provider=kokoro_onnx event=interrupted")
+            break
+        block = pcm[start : start + frame_samples]
+        await audio_track.write_pcm(block, sample_rate=sr)
+        if first_write_at is None:
+            first_write_at = time.perf_counter()
+            monitor_log("tts provider=kokoro_onnx event=first_pcm_to_webrtc_track")
+    if first_write_at is not None:
+        monitor_time(
+            "tts",
+            "first_audio_track_write",
+            first_write_at - started_at,
+            provider="kokoro_onnx",
+            voice=voice,
+        )
 
 
 class KokoroOnnxTTSProvider:
-    def __init__(self, voice: str = "af_sarah", speed: float = 1.0, lang: str = "en-us"):
+    """In-process Kokoro TTS provider (ONNX runtime).
+
+    Parameters
+    ----------
+    voice, speed, lang:
+        Voice pack, speech rate, and language tag passed to ``Kokoro.create``.
+    output:
+        ``"local"`` writes to the server speaker via ``sounddevice``.
+        ``"webrtc"`` writes 20 ms PCM blocks into ``audio_track``.
+    audio_track:
+        Outbound aiortc audio track — required when ``output="webrtc"``.
+    """
+
+    def __init__(
+        self,
+        voice: str = "af_sarah",
+        speed: float = 1.0,
+        lang: str = "en-us",
+        output: str = "local",
+        audio_track: Optional[Any] = None,
+    ):
+        if output not in {"local", "webrtc"}:
+            raise ValueError(f"Unknown KokoroOnnxTTSProvider output: {output}")
+        if output == "webrtc" and audio_track is None:
+            raise ValueError("audio_track is required for KokoroOnnxTTSProvider(output='webrtc')")
         self.voice = voice
         self.speed = speed
         self.lang = lang
+        self.output = output
+        self.audio_track = audio_track
 
     async def speak(self, text: str, interrupt_event: asyncio.Event) -> None:
         if interrupt_event.is_set():
             return
-        await _play_kokoro_audio(text, interrupt_event, voice=self.voice, speed=self.speed, lang=self.lang)
+        if self.output == "local":
+            await _play_kokoro_local(text, interrupt_event, self.voice, self.speed, self.lang)
+            return
+        await _stream_kokoro_to_track(
+            text, interrupt_event, self.audio_track, self.voice, self.speed, self.lang
+        )
+
+    def clear_output(self) -> None:
+        """Best-effort clear of any queued audio in the outbound track."""
+        if self.output == "webrtc" and self.audio_track is not None and hasattr(self.audio_track, "clear"):
+            self.audio_track.clear()
