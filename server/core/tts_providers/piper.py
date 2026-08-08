@@ -17,16 +17,20 @@ Two output modes:
 
 Model / config file paths are configurable via env:
 
-* ``PIPER_MODEL_PATH``   — path to ``<voice>.onnx`` (default:
-  ``ext/piper/en_US-lessac-medium.onnx`` under repo root).
+* ``PIPER_MODEL_PATH``   — path to ``<voice>.onnx``. If unset the
+  default ``en_US-lessac-medium`` voice is used and auto-fetched from
+  Hugging Face on first use into ``$XDG_CACHE_HOME/mulive/piper/``. If
+  set to an explicit path, that path must exist (no download attempted).
 * ``PIPER_CONFIG_PATH``  — path to ``<voice>.onnx.json`` (default:
   ``<PIPER_MODEL_PATH>.json``).
+
+Air-gapped deployments: pre-place the voice at either the env-overridden
+path or the cache directory to skip the network round-trip.
 """
 
 import asyncio
 import os
 import time
-import warnings
 from pathlib import Path
 from typing import Any, Optional
 
@@ -37,40 +41,109 @@ from ..logging_utils import monitor_log, monitor_time
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 
+# Default voice — small (~60 MB), permissively licensed, ships with the
+# piper1-gpl catalog and is well-tested on 1-vCPU CPU boxes.
+DEFAULT_PIPER_VOICE = "en_US-lessac-medium"
+
+# Upstream layout on the rhasspy/piper-voices Hugging Face repo mirrors
+# <lang>/<locale>/<voice>/<quality>/<voice>-<quality>.onnx[.json].
+_PIPER_VOICE_URL_BASE = (
+    "https://huggingface.co/rhasspy/piper-voices/resolve/main/"
+    "en/en_US/lessac/medium"
+)
+
+
+def _piper_cache_dir() -> Path:
+    """Return (and create) the directory used to cache Piper voice assets."""
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    cache = Path(base) / "mulive" / "piper"
+    cache.mkdir(parents=True, exist_ok=True)
+    return cache
+
+
+def _download_piper_asset(url: str, dest: Path) -> Path:
+    """Download ``url`` to ``dest`` atomically.
+
+    Writes to ``dest.with_suffix('.part')`` first so a partial download
+    from a Ctrl-C never presents as a valid cached asset. Unlike the
+    Silero fetcher we don't pin a SHA-256 here — Piper's HF catalog is
+    versioned by voice/quality name, not by revision, and shipping a
+    hash per voice would require pinning every voice we might ever add.
+    """
+    import urllib.request
+
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    print(f"Piper asset not found locally; downloading from {url} -> {dest}")
+    with urllib.request.urlopen(url, timeout=60) as response:
+        data = response.read()
+    tmp.write_bytes(data)
+    tmp.replace(dest)
+    return dest
+
+
+def _ensure_piper_asset(kind: str) -> Path:
+    """Locate (and if needed download) the Piper voice file for ``kind``.
+
+    ``kind`` is either ``"model"`` (``.onnx``) or ``"config"``
+    (``.onnx.json``).
+
+    Resolution order — mirrors :func:`server.core.turndet._find_silero_onnx_model`:
+
+    1. Explicit env override (``PIPER_MODEL_PATH`` / ``PIPER_CONFIG_PATH``).
+       If set, the file must already exist — we never auto-download to a
+       user-specified path.
+    2. Pre-existing file at ``ext/piper/<voice>.onnx[.json]`` under the
+       repo root (deployment-friendly, matches the old manual layout).
+    3. Cached copy at ``$XDG_CACHE_HOME/mulive/piper/<voice>.onnx[.json]``.
+    4. Fresh download of the default voice from the pinned Hugging Face
+       URL into the cache dir.
+    """
+    suffix = ".onnx" if kind == "model" else ".onnx.json"
+    env_var = "PIPER_MODEL_PATH" if kind == "model" else "PIPER_CONFIG_PATH"
+    env_value = os.environ.get(env_var)
+    if env_value:
+        path = Path(env_value)
+        if not path.exists():
+            raise FileNotFoundError(f"{env_var} does not exist: {path}")
+        return path
+    if kind == "config":
+        # If only PIPER_MODEL_PATH is set, mirror the model's directory
+        # for the config file — same convention as the manual layout.
+        model_override = os.environ.get("PIPER_MODEL_PATH")
+        if model_override:
+            path = Path(model_override).with_suffix(".onnx.json")
+            if not path.exists():
+                raise FileNotFoundError(
+                    f"Piper config file not found next to PIPER_MODEL_PATH: {path}"
+                )
+            return path
+
+    filename = f"{DEFAULT_PIPER_VOICE}{suffix}"
+    bundled = PROJECT_ROOT / "ext" / "piper" / filename
+    if bundled.exists():
+        return bundled
+    cached = _piper_cache_dir() / filename
+    if cached.exists():
+        return cached
+    return _download_piper_asset(f"{_PIPER_VOICE_URL_BASE}/{filename}", cached)
+
 
 def _model_path() -> Path:
-    return Path(
-        os.environ.get(
-            "PIPER_MODEL_PATH",
-            str(PROJECT_ROOT / "ext" / "piper" / "en_US-lessac-medium.onnx"),
-        )
-    )
+    return _ensure_piper_asset("model")
 
 
 def _config_path() -> Path:
-    override = os.environ.get("PIPER_CONFIG_PATH")
-    if override:
-        return Path(override)
-    return _model_path().with_suffix(_model_path().suffix + ".json")
+    return _ensure_piper_asset("config")
 
 
 _voice = None
-
-
-def warn_if_piper_assets_missing() -> None:
-    model = _model_path()
-    config = _config_path()
-    if not model.exists():
-        warnings.warn(f"Piper model file not found at {model}", RuntimeWarning)
-    if not config.exists():
-        warnings.warn(f"Piper config file not found at {config}", RuntimeWarning)
 
 
 def get_voice():
     """Load the Piper voice on first use and cache it process-wide."""
     global _voice
     if _voice is None:
-        warn_if_piper_assets_missing()
         from piper import PiperVoice
 
         _voice = PiperVoice.load(str(_model_path()), str(_config_path()))
