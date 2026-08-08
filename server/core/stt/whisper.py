@@ -9,11 +9,17 @@ from ..events import TranscriptEvent
 from ..logging_utils import monitor_time
 
 
-def get_faster_whisper_model(model_name: str = "base", compute_type: str = "int8"):
+def get_faster_whisper_model(model_name: str = "base", compute_type: str = "int8", **kwargs):
+    """Load a faster-whisper CTranslate2 model.
+
+    Extra keyword arguments are forwarded to ``faster_whisper.WhisperModel`` so
+    callers can tune the CPU-bound settings that matter on small servers
+    (``cpu_threads``, ``num_workers``, ``device``, ``device_index``, ...).
+    """
     from faster_whisper import WhisperModel
 
-    print("Loading faster Whisper model...")
-    return WhisperModel(model_name, compute_type=compute_type)
+    print(f"Loading faster Whisper model... model={model_name} compute_type={compute_type} kwargs={kwargs}")
+    return WhisperModel(model_name, compute_type=compute_type, **kwargs)
 
 
 def get_whisper_model(mode="faster_whisper", model_size: str = "base", model_id=None, **kwargs):
