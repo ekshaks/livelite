@@ -16,5 +16,6 @@ PyYAML
 pillow
 librosa
 kokoro-onnx
+piper-tts
 sounddevice
 text2num>=3,<4
