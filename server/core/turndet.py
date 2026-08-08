@@ -23,18 +23,126 @@ def _load_silero_torch():
     return torch.hub.load("snakers4/silero-vad", "silero_vad", trust_repo=True)
 
 
-def _load_silero_onnx():
-    """Load Silero VAD via the silero-vad PyPI package with the ONNX runtime.
+def _find_silero_onnx_model():
+    """Locate the Silero VAD ONNX model file without importing torch.
 
-    Returns (model, utils) where utils[0] is get_speech_timestamps so the
-    call sites do not need to know which backend they are talking to.
+    The ``silero-vad`` PyPI package bundles ``data/silero_vad.onnx``, but its
+    ``__init__`` imports torch — so we find the file via ``find_spec`` (which
+    does not execute the package) instead of importing it. Install with
+    ``pip install --no-deps silero-vad onnxruntime`` to skip torch entirely,
+    or point ``SILERO_ONNX_MODEL_PATH`` at a standalone model file.
     """
-    from silero_vad import get_speech_timestamps, load_silero_vad
+    import importlib.util
+    from pathlib import Path
 
-    model = load_silero_vad(onnx=True)
-    # Match the (model, utils_tuple) shape torch.hub returns; only utils[0]
-    # is consumed by _build_is_speech.
-    return model, (get_speech_timestamps,)
+    env_path = os.environ.get("SILERO_ONNX_MODEL_PATH")
+    if env_path:
+        path = Path(env_path)
+        if not path.exists():
+            raise FileNotFoundError(f"SILERO_ONNX_MODEL_PATH does not exist: {path}")
+        return path
+    spec = importlib.util.find_spec("silero_vad")
+    if spec is not None and spec.submodule_search_locations:
+        for location in spec.submodule_search_locations:
+            candidate = Path(location) / "data" / "silero_vad.onnx"
+            if candidate.exists():
+                return candidate
+    raise FileNotFoundError(
+        "Silero VAD ONNX model not found. Either `pip install --no-deps "
+        "silero-vad onnxruntime` or set SILERO_ONNX_MODEL_PATH to the "
+        "silero_vad.onnx file."
+    )
+
+
+class _NumpyOnnxVad:
+    """Silero VAD on onnxruntime with numpy I/O — no torch dependency.
+
+    Mirrors the reference OnnxWrapper: 512-sample windows at 16 kHz (256 at
+    8 kHz) with a 64-sample rolling context and a (2, 1, 128) recurrent state.
+    """
+
+    def __init__(self, model_path):
+        import onnxruntime
+
+        opts = onnxruntime.SessionOptions()
+        opts.inter_op_num_threads = 1
+        opts.intra_op_num_threads = 1
+        self.session = onnxruntime.InferenceSession(
+            str(model_path), providers=["CPUExecutionProvider"], sess_options=opts
+        )
+
+    def speech_probs(self, audio_fp32, rate):
+        """Return the per-window speech probability list for one audio clip."""
+        window = 512 if rate == 16000 else 256
+        context_size = 64 if rate == 16000 else 32
+        audio = np.asarray(audio_fp32, dtype=np.float32).reshape(-1)
+        if len(audio) % window:
+            audio = np.pad(audio, (0, window - len(audio) % window))
+        state = np.zeros((2, 1, 128), dtype=np.float32)
+        context = np.zeros((1, context_size), dtype=np.float32)
+        sr = np.array(rate, dtype=np.int64)
+        probs = []
+        for start in range(0, len(audio), window):
+            chunk = audio[start : start + window][None, :]
+            x = np.concatenate([context, chunk], axis=1)
+            out, state = self.session.run(None, {"input": x, "state": state, "sr": sr})
+            context = x[:, -context_size:]
+            probs.append(float(out[0, 0]))
+        return probs
+
+
+def _onnx_get_speech_timestamps(
+    audio,
+    model,
+    sampling_rate=16000,
+    threshold=0.5,
+    min_speech_duration_ms=250,
+    min_silence_duration_ms=100,
+    speech_pad_ms=30,
+    **_,
+):
+    """Numpy segmenter over :class:`_NumpyOnnxVad` probabilities.
+
+    Same call signature as silero's ``get_speech_timestamps`` (as used by
+    ``_build_is_speech``); returns a list of ``{"start", "end"}`` sample
+    ranges. ``speech_pad_ms`` is accepted for compatibility but padding is
+    irrelevant to the boolean is-speech decision this pipeline makes.
+    """
+    window = 512 if sampling_rate == 16000 else 256
+    probs = model.speech_probs(audio, sampling_rate)
+    min_speech_frames = max(1, int(min_speech_duration_ms * sampling_rate / 1000 / window))
+    min_silence_frames = max(1, int(min_silence_duration_ms * sampling_rate / 1000 / window))
+    neg_threshold = max(threshold - 0.15, 0.01)
+
+    segments = []
+    current_start = None
+    silence_run = 0
+    for index, prob in enumerate(probs):
+        if prob >= threshold:
+            if current_start is None:
+                current_start = index
+            silence_run = 0
+        elif current_start is not None and prob < neg_threshold:
+            silence_run += 1
+            if silence_run >= min_silence_frames:
+                end = index - silence_run + 1
+                if end - current_start >= min_speech_frames:
+                    segments.append({"start": current_start * window, "end": end * window})
+                current_start = None
+                silence_run = 0
+    if current_start is not None and len(probs) - current_start >= min_speech_frames:
+        segments.append({"start": current_start * window, "end": len(probs) * window})
+    return segments
+
+
+def _load_silero_onnx():
+    """Load Silero VAD on onnxruntime + numpy, with no torch dependency.
+
+    Returns (model, utils) where utils[0] is a get_speech_timestamps-shaped
+    callable so call sites do not need to know which backend they are on.
+    """
+    model = _NumpyOnnxVad(_find_silero_onnx_model())
+    return model, (_onnx_get_speech_timestamps,)
 
 
 def get_vad_model() -> Tuple[Any, Any]:
