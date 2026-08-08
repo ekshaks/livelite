@@ -142,6 +142,20 @@ if __name__ == "__main__":
 
     stt_kwargs = _parse_kv_list(args.stt_kwarg)
 
+    # Warm up every heavyweight model BEFORE accepting connections. Otherwise
+    # the first cost gets paid on the hot path — for the user this looks like
+    # the browser hanging on connect (Whisper loads), the mic hanging on
+    # first speech (Silero VAD loads or downloads), and a 2 s gap before the
+    # first assistant reply (Kokoro loads + ONNX graph init + eSpeak G2P).
+    if args.stt_provider in {"faster_whisper", "mlx"}:
+        from server.core.stt.whisper import warm_up as _warm_stt
+        _warm_stt(mode=args.stt_provider, model_size=args.stt_model_size, **stt_kwargs)
+    from server.core.turndet import warm_up_vad as _warm_vad
+    _warm_vad()
+    if args.tts_provider == "kokoro_onnx" and tts_mode is not None:
+        from server.core.tts_providers.kokoro_onnx import warm_up as _warm_tts
+        _warm_tts()
+
     server = Server(
         run_session=lambda session: run_session(
             session,
