@@ -100,12 +100,13 @@ def parse_args():
     )
     parser.add_argument(
         "--tts-provider",
-        choices=["kokoro_fastapi", "kokoro_onnx"],
+        choices=["kokoro_fastapi", "kokoro_onnx", "piper"],
         default="kokoro_fastapi",
         help=(
             "kokoro_fastapi (default) talks to an external Kokoro-FastAPI HTTP "
-            "server; kokoro_onnx runs the ONNX model in-process (no external "
-            "server, fits a 2 GB box)."
+            "server; kokoro_onnx runs the ONNX model in-process; piper runs "
+            "rhasspy Piper in-process (truly streaming, smallest footprint, "
+            "best fit for 1-vCPU boxes)."
         ),
     )
     group = parser.add_mutually_exclusive_group()
@@ -165,6 +166,9 @@ if __name__ == "__main__":
     if args.tts_provider == "kokoro_onnx" and tts_mode is not None:
         from server.core.tts_providers.kokoro_onnx import warm_up as _warm_tts
         _warm_tts()
+    if args.tts_provider == "piper" and tts_mode is not None:
+        from server.core.tts_providers.piper import warm_up as _warm_piper
+        _warm_piper()
 
     server = Server(
         run_session=lambda session: run_session(
