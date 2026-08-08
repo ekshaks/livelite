@@ -101,17 +101,20 @@ class Server:
         return await self._accept_offer(request, self.run_session, self.config)
 
     async def _accept_offer(self, request, run_session, config):
+        params = await request.json()
         # Reject new offers when the server is at its concurrency cap.
         # Kokoro + faster-whisper are CPU-bound and a small AWS box cannot
-        # multiplex many voice sessions in real time, so we cap sessions
-        # here at the front door (default 2, override via config).
-        max_sessions = self.config.get("max_concurrent_sessions", 2)
+        # multiplex many voice sessions in real time. Default is None
+        # (no cap — previous behaviour); deployments opt in via config,
+        # e.g. quickstart's --max-concurrent-sessions. The check runs after
+        # the await above so check -> create -> add has no interleaving
+        # point on the event loop (no double-admit race).
+        max_sessions = config.get("max_concurrent_sessions")
         if max_sessions is not None and len(self.pcs) >= max_sessions:
             print(f"Rejecting offer: at capacity ({len(self.pcs)}/{max_sessions})")
             raise web.HTTPServiceUnavailable(
                 text=f"Server busy: {len(self.pcs)} of {max_sessions} sessions active."
             )
-        params = await request.json()
         pc = pc_session_setup(
             run_session,
             config,
