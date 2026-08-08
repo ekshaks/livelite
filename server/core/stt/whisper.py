@@ -32,14 +32,14 @@ def get_whisper_model(mode="faster_whisper", model_size: str = "base", model_id=
     raise ValueError(f"Unknown Whisper mode: {mode}")
 
 
-def infer_faster_whisper(audio_data, model):
-    segments, _ = model.transcribe(audio_data, language="en")
+def infer_faster_whisper(audio_data, model, language="en"):
+    segments, _ = model.transcribe(audio_data, language=language)
     return " ".join(segment.text for segment in segments)
 
 
-def infer_whisper(mode, audio_data, model):
+def infer_whisper(mode, audio_data, model, language="en"):
     if mode == "faster_whisper":
-        return infer_faster_whisper(audio_data, model)
+        return infer_faster_whisper(audio_data, model, language=language)
     if mode == "mlx":
         from .mlx import infer_mlx
 
@@ -69,7 +69,7 @@ class WhisperSTT:
             return ""
         start_time = time.perf_counter()
         audio_fp32 = samples.astype(np.float32) / 32768.0
-        result = infer_whisper(self.mode, audio_fp32, self.model)
+        result = infer_whisper(self.mode, audio_fp32, self.model, language=self.language)
         monitor_time(
             "stt",
             "transcribe",
