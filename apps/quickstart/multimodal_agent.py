@@ -1,4 +1,5 @@
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -142,16 +143,25 @@ if __name__ == "__main__":
 
     stt_kwargs = _parse_kv_list(args.stt_kwarg)
 
-    # Warm up every heavyweight model BEFORE accepting connections. Otherwise
-    # the first cost gets paid on the hot path — for the user this looks like
-    # the browser hanging on connect (Whisper loads), the mic hanging on
-    # first speech (Silero VAD loads or downloads), and a 2 s gap before the
-    # first assistant reply (Kokoro loads + ONNX graph init + eSpeak G2P).
-    if args.stt_provider in {"faster_whisper", "mlx"}:
+    # Warm up every heavyweight model BEFORE accepting connections, but only
+    # for the small-server (AWS) providers where lazy first-use blocks the
+    # user's hot path:
+    #
+    #   * faster-whisper — per-session load is 1-3 s on 1 vCPU (visible as
+    #     "browser hangs on connect"). MLX on desktop stays lazy: it was
+    #     already lazily loaded per WhisperSTT and is fast on Apple Silicon.
+    #   * SILERO_BACKEND=onnx — first inference may DOWNLOAD the ONNX model
+    #     (visible as "mic hangs on first speech"). The default torch-hub
+    #     backend on desktop stays lazy — its behavior is unchanged.
+    #   * kokoro_onnx (in-process TTS) — ONNX graph init + eSpeak G2P is
+    #     expensive on the first synth. The default kokoro_fastapi provider
+    #     runs in a separate server, so nothing to warm up in-process.
+    if args.stt_provider == "faster_whisper":
         from server.core.stt.whisper import warm_up as _warm_stt
         _warm_stt(mode=args.stt_provider, model_size=args.stt_model_size, **stt_kwargs)
-    from server.core.turndet import warm_up_vad as _warm_vad
-    _warm_vad()
+    if os.environ.get("SILERO_BACKEND", "torch").lower() == "onnx":
+        from server.core.turndet import warm_up_vad as _warm_vad
+        _warm_vad()
     if args.tts_provider == "kokoro_onnx" and tts_mode is not None:
         from server.core.tts_providers.kokoro_onnx import warm_up as _warm_tts
         _warm_tts()
