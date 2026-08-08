@@ -1,5 +1,5 @@
 from .llm_utils import call_llm, create_agent, split_spoken_written
-from .pipeline_helpers import add_kokoro_tts, add_text_sinks
+from .pipeline_helpers import add_tts, add_text_sinks
 from .stream_dsl import (
     Stream,
     SubGroup,
@@ -69,7 +69,7 @@ async def run_multimodal_session(
 
     add_text_sinks(user_text, session, role="user", subs=subs)
     add_text_sinks(assistant_written, session, role="assistant", subs=subs)
-    add_kokoro_tts(
+    add_tts(
         assistant_spoken,
         pc,
         turn.signals,
