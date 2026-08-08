@@ -1,7 +1,14 @@
-from aiortc import RTCPeerConnection, RTCSessionDescription, MediaStreamTrack
+from aiortc import (
+    MediaStreamTrack,
+    RTCConfiguration,
+    RTCIceServer,
+    RTCPeerConnection,
+    RTCSessionDescription,
+)
 from aiortc.mediastreams import MediaStreamError
 import asyncio
 import json
+import os
 
 from .core.audio_utils import convert_and_resample_frame
 from .core.audio_utils import is_active_speaker
@@ -9,6 +16,32 @@ from .core.webrtc_audio import AssistantAudioTrack
 from .core.session import SessionContext
 from .core.utils import rx_Subject as Subject # for input audio/video subjects
 import numpy as np
+
+
+DEFAULT_STUN_URLS = "stun:stun.l.google.com:19302"
+
+
+def _load_ice_servers(config):
+    """Build the ICE-server list for the peer connection.
+
+    On EC2 (and any 1:1 NAT box) aiortc only sees the private IP, so the
+    remote browser cannot reach it. A STUN server lets aiortc discover its
+    public reflexive address and hand that to the client. On desktop STUN
+    is inert, so this is a strict superset of the previous behaviour.
+
+    Sources, in priority order:
+
+    1. ``config['ice_servers']`` — a list of dicts ``{urls, username?, credential?}``.
+    2. ``STUN_URLS`` env var — comma-separated STUN/TURN URLs.
+    3. Google's public STUN as a safe default.
+    """
+    configured = (config or {}).get("ice_servers")
+    if configured:
+        return [RTCIceServer(**server) for server in configured]
+    urls = os.environ.get("STUN_URLS", DEFAULT_STUN_URLS).strip()
+    if not urls:
+        return []
+    return [RTCIceServer(urls=[u.strip() for u in urls.split(",") if u.strip()])]
 
 async def setup_audio_track(pc, track: MediaStreamTrack, speech_turn_input, stop_event, config):
     """Handle incoming audio track and process it through the pipeline."""
@@ -83,8 +116,8 @@ async def setup_video_track(pc, track: MediaStreamTrack, video_obs_input, stop_e
     print("Video processing stopped")
 
 def pc_session_setup(run_session, config, on_peer_close=None):
-    
-    pc = RTCPeerConnection()
+
+    pc = RTCPeerConnection(RTCConfiguration(iceServers=_load_ice_servers(config)))
     
     stop_event = asyncio.Event()
     data_channels = {}
