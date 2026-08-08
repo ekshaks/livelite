@@ -113,6 +113,15 @@ def parse_args():
     tls_group = parser.add_mutually_exclusive_group()
     tls_group.add_argument("--https", action="store_true", default=True, help="Serve HTTPS with local certs. Default.")
     tls_group.add_argument("--http", action="store_true", help="Serve plain HTTP.")
+    parser.add_argument(
+        "--no-debug",
+        action="store_true",
+        help=(
+            "Disable debug logging and per-chunk librosa audio metrics. "
+            "Recommended on small servers: enables the cheap numpy-only "
+            "active-speaker check."
+        ),
+    )
     return parser.parse_args()
 
 
@@ -124,7 +133,7 @@ if __name__ == "__main__":
 
     config = web_config(
         use_https=not args.http,
-        debug=True,
+        debug=not args.no_debug,
         rms_thresh=0.025,
         input_video_sample_interval=100,
         filter_gender=None,
