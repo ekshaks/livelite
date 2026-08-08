@@ -23,14 +23,77 @@ def _load_silero_torch():
     return torch.hub.load("snakers4/silero-vad", "silero_vad", trust_repo=True)
 
 
+# Pinned upstream copy of silero_vad.onnx. The URL is stable (a git tag on
+# snakers4/silero-vad) and the sha256 lets us fail loudly if the bytes ever
+# change under us. Bump both together on upgrade.
+_SILERO_ONNX_URL = (
+    "https://raw.githubusercontent.com/snakers4/silero-vad/v5.1.2/"
+    "src/silero_vad/data/silero_vad.onnx"
+)
+_SILERO_ONNX_SHA256 = (
+    "2623a2953f6ff3d2c1e61740c6cdb7168133479b267dfef114a4a3cc5bdd788f"
+)
+_SILERO_ONNX_BYTES = 2327524
+
+
+def _mulive_cache_dir():
+    """Return (and create) the directory used to cache downloaded VAD assets."""
+    from pathlib import Path
+
+    base = os.environ.get("XDG_CACHE_HOME") or str(Path.home() / ".cache")
+    cache = Path(base) / "mulive"
+    cache.mkdir(parents=True, exist_ok=True)
+    return cache
+
+
+def _download_silero_onnx(dest):
+    """Download the pinned Silero VAD ONNX to *dest* and verify its sha256.
+
+    Writes to ``dest.with_suffix('.part')`` first, verifies the hash, then
+    atomically renames — so a partial download from a Ctrl-C never presents
+    as a valid cached model.
+    """
+    import hashlib
+    import urllib.request
+    from pathlib import Path
+
+    dest = Path(dest)
+    tmp = dest.with_suffix(dest.suffix + ".part")
+    print(
+        f"Silero VAD ONNX not found locally; downloading {_SILERO_ONNX_BYTES / 1024:.0f} KB "
+        f"from {_SILERO_ONNX_URL} -> {dest}"
+    )
+    with urllib.request.urlopen(_SILERO_ONNX_URL, timeout=30) as response:
+        data = response.read()
+    digest = hashlib.sha256(data).hexdigest()
+    if digest != _SILERO_ONNX_SHA256:
+        raise RuntimeError(
+            f"Downloaded Silero VAD ONNX has sha256 {digest}, expected "
+            f"{_SILERO_ONNX_SHA256}. Refusing to cache; set "
+            f"SILERO_ONNX_MODEL_PATH to a trusted file instead."
+        )
+    tmp.write_bytes(data)
+    tmp.replace(dest)
+    return dest
+
+
 def _find_silero_onnx_model():
     """Locate the Silero VAD ONNX model file without importing torch.
 
-    The ``silero-vad`` PyPI package bundles ``data/silero_vad.onnx``, but its
-    ``__init__`` imports torch — so we find the file via ``find_spec`` (which
-    does not execute the package) instead of importing it. Install with
-    ``pip install --no-deps silero-vad onnxruntime`` to skip torch entirely,
-    or point ``SILERO_ONNX_MODEL_PATH`` at a standalone model file.
+    Resolution order:
+
+    1. ``SILERO_ONNX_MODEL_PATH`` env var (must exist).
+    2. The ``silero-vad`` PyPI wheel's bundled ``data/silero_vad.onnx``, if
+       installed (found via ``find_spec`` so we do not execute its
+       torch-importing ``__init__``).
+    3. A cached copy at ``$XDG_CACHE_HOME/mulive/silero_vad.onnx``.
+    4. Fresh download of the pinned upstream copy into the cache dir, with
+       sha256 verification.
+
+    So on a fresh AWS box the ONNX backend needs only ``pip install
+    onnxruntime`` — the model is fetched on first use (~2.3 MB). Air-gapped
+    deployments can still point ``SILERO_ONNX_MODEL_PATH`` at a preloaded
+    file to skip the network round-trip.
     """
     import importlib.util
     from pathlib import Path
@@ -47,11 +110,10 @@ def _find_silero_onnx_model():
             candidate = Path(location) / "data" / "silero_vad.onnx"
             if candidate.exists():
                 return candidate
-    raise FileNotFoundError(
-        "Silero VAD ONNX model not found. Either `pip install --no-deps "
-        "silero-vad onnxruntime` or set SILERO_ONNX_MODEL_PATH to the "
-        "silero_vad.onnx file."
-    )
+    cached = _mulive_cache_dir() / "silero_vad.onnx"
+    if cached.exists():
+        return cached
+    return _download_silero_onnx(cached)
 
 
 class _NumpyOnnxVad:
@@ -143,6 +205,20 @@ def _load_silero_onnx():
     """
     model = _NumpyOnnxVad(_find_silero_onnx_model())
     return model, (_onnx_get_speech_timestamps,)
+
+
+def warm_up_vad() -> None:
+    """Load the Silero VAD model and run one dummy inference.
+
+    The ONNX backend can also download the model on first use, which then
+    happens the first time the microphone is turned on and looks like a
+    hang. Preloading at server start moves the cost off the hot path.
+    """
+    started = time.perf_counter()
+    model, utils = get_vad_model()
+    silence = np.zeros(16000, dtype=np.float32)  # 1 s of silence @ 16 kHz
+    utils[0](silence, model, sampling_rate=16000)
+    print(f"Silero VAD warmed up in {time.perf_counter() - started:.2f} s")
 
 
 def get_vad_model() -> Tuple[Any, Any]:
