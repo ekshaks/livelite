@@ -55,21 +55,29 @@ Small, orthogonal changes that let the `aws` branch run on a
   must not be committed. It isn't: the CLI defaults are still
   `--stt-provider mlx --stt-model-size tiny`; the AWS deployment
   override lives in the run script or the systemd unit only.
-- **No new clause splitter.** Task 2 asked whether the spell-app clause
-  splitter could be made common. Grepping `mulive-aug1/muapps/spell/`
-  shows no dedicated per-clause splitter — the only helper is
-  `split_spoken_written` which separates the SPOKEN/WRITTEN sections
-  of the LLM output. The quickstart prompt (`visual_solver`) already
-  caps SPOKEN to 2-3 short sentences, so kokoro-onnx synthesizes short
-  clips already; no splitter needed.
-- **`max_concurrent_sessions=2`, not 1.** User explicitly asked for 2.
-  Leaves headroom for the second CPU thread on a t4g.small (2 vCPU).
+- **Spell's clause splitter made common.** Task 2 asked whether the
+  spell-app clause splitter could be made common. It could: spell's
+  `SPOKEN_PHRASE_BOUNDARY` regex + per-phrase expansion now live in
+  `pipeline_helpers.split_spoken_phrases()`, and `add_kokoro_tts`
+  applies it (via the existing `expand_items` operator) for the
+  non-streaming `kokoro_onnx` provider only. Streaming kokoro_fastapi
+  keeps whole-utterance requests, so desktop is unchanged. The spell
+  app can import the shared helper when branches merge.
+- **Cap is opt-in; quickstart defaults to 2.** The servers default to
+  no cap (`max_concurrent_sessions: None`) so the multi-user dashboard
+  path keeps its old behaviour; the quickstart CLI defaults
+  `--max-concurrent-sessions` to 2 per the user's "set it to 2"
+  (0 = unlimited). Leaves headroom for the second vCPU on a t4g.small.
 - **STUN default is Google public STUN.** No cost, no accounts. If a
   deployment cannot open UDP broadly in the security group, add a
   TURN server via `STUN_URLS` — no code change needed.
-- **VAD ONNX backend is opt-in.** Existing desktop users keep torch
-  because their environment already has it; only AWS deployments set
-  `SILERO_BACKEND=onnx` and skip the torch install.
+- **VAD ONNX backend is opt-in and genuinely torch-free.** Existing
+  desktop users keep torch because their environment already has it;
+  AWS deployments set `SILERO_BACKEND=onnx`. The `silero-vad` PyPI
+  package itself imports torch even in ONNX mode, so the backend runs
+  the model directly on onnxruntime with numpy I/O and locates the
+  bundled `silero_vad.onnx` without executing the package
+  (`pip install --no-deps silero-vad onnxruntime`).
 
 ## Alternatives rejected
 
@@ -97,11 +105,45 @@ Small, orthogonal changes that let the `aws` branch run on a
 - **503s during legitimate load** — cap is configurable per deployment
   and desktop sets it to `None` (no cap) if desired.
 
+## Review findings and fixes
+
+A read-only review by gpt-5.6-sol (~4% of task budget, under the 20%
+cap) found 8 real issues in the first round of commits; all fixed:
+
+1. `silero-vad` PyPI package hard-depends on torch even in ONNX mode —
+   "skips torch" claim was false → rewrote the backend on raw
+   onnxruntime + numpy (`0a10fb5`).
+2. FastAPI server never passed `on_peer_close`, so closed peers leaked
+   and a cap would eventually 503 forever → fixed (`587b29e`).
+3. Cap check ran before `await request.json()` — two simultaneous
+   offers could both be admitted → check moved after the await
+   (`587b29e`).
+4. Cap default of 2 in the servers changed existing multi-user
+   behaviour → servers default to no cap; quickstart CLI defaults to 2
+   (`587b29e`).
+5. `create_tts_provider` never passed `output`/`audio_track` to the
+   ONNX provider → wired (`ae45f3e`).
+6. `--stt-language` was stored but `infer_faster_whisper` hardcoded
+   English → language now reaches `model.transcribe` (`2f3cea7`).
+7. Spell's clause splitter exists (`SPOKEN_PHRASE_BOUNDARY` +
+   per-phrase expansion) — first round wrongly said it didn't → hoisted
+   to `pipeline_helpers.split_spoken_phrases()` (`ae45f3e`).
+8. `requirements.txt` was missing aiortc/aiohttp/fastapi/uvicorn — a
+   fresh install could not import the server → added (`a65226a`).
+
+Plus one performance finding relevant to "spell on t2 was slow":
+`is_active_speaker` ran the full librosa stack (1.16 ms/chunk, 1.34 s
+first call) when only RMS mattered → numpy fast path, 0.009 ms/chunk
+(`8fb8c61`).
+
 ## How the change was verified
 
-- `python3 -c "import ast; ast.parse(open(p).read())"` on all touched
-  files — clean.
-- Git log — five atomic commits, one logical change per commit.
-- gpt-5.6-sol read-only review across all diffs (see review notes at
-  the end of `evolution.html`).
+- All touched files parse (`ast.parse`) and the full test suite passes:
+  31/31 in a clean Python 3.12 environment.
+- Torch-free VAD verified end-to-end in an env without torch installed:
+  real speech (16 kHz WAV) detected in every chunk (probs 0.58–0.98),
+  silence (0.002–0.009) and white noise rejected.
+- Active-speaker fast path verified to give identical decisions to the
+  librosa path on silence, quiet noise, real speech, and loud noise.
+- Phrase splitter verified on sample text (5 phrases from 3 sentences).
 - End-to-end run pending on the target AWS box (user's next step).

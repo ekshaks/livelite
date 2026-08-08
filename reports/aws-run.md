@@ -7,23 +7,33 @@ server. Certs and nginx are already configured; espeak-ng is installed.
 
 ## 1. What ships in this branch
 
-Five small, orthogonal changes were added, all behind flags so the
-desktop stack is bit-for-bit unaffected:
+Small, orthogonal changes, all behind flags so the desktop stack is
+unaffected:
 
 - `--stt-provider` / `--stt-model-size` / `--stt-language` and
   repeatable `--stt-kwarg KEY=VALUE` on the quickstart CLI. Extra kwargs
-  flow all the way into `faster_whisper.WhisperModel`.
+  flow all the way into `faster_whisper.WhisperModel`, and the language
+  actually reaches `model.transcribe`.
 - `--tts-provider {kokoro_fastapi, kokoro_onnx}` on the quickstart CLI.
-  `kokoro_onnx` runs in-process (no second PyTorch server) and can now
-  push PCM into the outbound WebRTC audio track.
+  `kokoro_onnx` runs in-process (no second PyTorch server) and pushes
+  PCM into the outbound WebRTC audio track. Spoken text is split into
+  punctuation-delimited phrases (same boundary the spell app uses) so
+  the non-streaming ONNX synthesis starts talking after the first short
+  phrase instead of the whole reply.
 - STUN configured on the peer connection (env `STUN_URLS`,
   comma-separated; defaults to Google public STUN).
-- `SILERO_BACKEND=onnx` env flag makes the VAD load via `silero-vad`
-  onnx (no torch).
-- `max_concurrent_sessions` (default 2) at the offer handler.
+- `SILERO_BACKEND=onnx` env flag runs the VAD on onnxruntime + numpy —
+  genuinely no torch import (the model file is found inside the
+  `silero-vad` wheel without executing the package, or via
+  `SILERO_ONNX_MODEL_PATH`).
+- `--max-concurrent-sessions` on the quickstart CLI (default 2,
+  0 = unlimited). The servers themselves default to no cap, so other
+  deployments keep their old behaviour.
+- `--no-debug` enables a numpy-only RMS active-speaker gate
+  (~100x cheaper per audio chunk than the librosa metrics path).
 
-Default provider is still `mlx` and default TTS is still
-`kokoro_fastapi`, so the committed defaults match desktop.
+Default STT is still `mlx` and default TTS is still `kokoro_fastapi`,
+so the committed defaults match desktop.
 
 ---
 
@@ -43,10 +53,12 @@ sudo apt install -y python3-venv build-essential ffmpeg
 python3 -m venv .venv && source .venv/bin/activate
 pip install -U pip wheel
 
-# Runtime deps — trim torch, add silero-vad + onnxruntime
-pip install -r requirements.txt
-pip uninstall -y torch                 # not needed with SILERO_BACKEND=onnx
-pip install silero-vad onnxruntime
+# Runtime deps — skip torch entirely (only Silero VAD needed it, and the
+# onnx backend below does not). silero-vad is installed WITHOUT its deps:
+# we only want the bundled silero_vad.onnx model file, not its torch import.
+grep -v '^torch$' requirements.txt | pip install -r /dev/stdin
+pip install --no-deps silero-vad
+pip install onnxruntime
 
 # 4 GB swap safety net (only a safety net; models must stay resident)
 sudo fallocate -l 4G /swapfile
@@ -81,6 +93,7 @@ export STUN_URLS="stun:stun.l.google.com:19302"  # default
 # Start the agent
 python apps/quickstart/multimodal_agent.py \
   --http \
+  --no-debug \
   --stt-provider faster_whisper \
   --stt-model-size base \
   --stt-kwarg compute_type=int8 \
@@ -88,6 +101,7 @@ python apps/quickstart/multimodal_agent.py \
   --stt-kwarg num_workers=1 \
   --tts-provider kokoro_onnx \
   --tts-browser \
+  --max-concurrent-sessions 2 \
   --llm-model groq:meta-llama/llama-4-scout-17b-16e-instruct
 ```
 
@@ -146,11 +160,12 @@ Environment=SILERO_BACKEND=onnx
 Environment=OMP_NUM_THREADS=1
 Environment=STUN_URLS=stun:stun.l.google.com:19302
 ExecStart=/home/ubuntu/mulive/.venv/bin/python \
-  apps/quickstart/multimodal_agent.py --http \
+  apps/quickstart/multimodal_agent.py --http --no-debug \
   --stt-provider faster_whisper --stt-model-size base \
   --stt-kwarg compute_type=int8 --stt-kwarg cpu_threads=1 \
   --stt-kwarg num_workers=1 \
-  --tts-provider kokoro_onnx --tts-browser
+  --tts-provider kokoro_onnx --tts-browser \
+  --max-concurrent-sessions 2
 Restart=on-failure
 RestartSec=3
 # Memory safety: hard-cap so OOM kicks the process instead of the box
@@ -215,11 +230,11 @@ ps -o pid,rss,cmd -C python
 # Any swap traffic? (should be zero after warm-up)
 vmstat 5
 
-# Session cap effective?
+# Session cap effective? (quickstart defaults to --max-concurrent-sessions 2)
 curl -s -o /dev/null -w "%{http_code}\n" \
   -X POST http://127.0.0.1:9000/offer -H 'content-type: application/json' -d '{}'
-# Should be 500 (bad sdp) on the first call, 503 once max_concurrent_sessions
-# active peers are up.
+# Should be 500 (bad sdp) while below the cap, 503 once the cap's worth of
+# peers are active.
 ```
 
 ---
