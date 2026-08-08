@@ -1,11 +1,12 @@
 """In-process Piper TTS provider.
 
-Piper (rhasspy/piper) is a small, MIT-licensed ONNX TTS. On 1-vCPU CPU
-boxes its real-time factor is ~0.1–0.3 for the *medium* voices, and
-unlike ``kokoro_onnx`` it streams PCM as it synthesizes — so first-audio
-latency is a small fraction of the utterance length instead of the whole
-clip's synthesis time. That directly kills the TTS gaps we saw with
-``kokoro_onnx`` on the AWS 1-vCPU box.
+Piper (``OHF-Voice/piper1-gpl``, PyPI ``piper-tts``) is a small,
+GPL-3.0 ONNX TTS. On 1-vCPU CPU boxes its real-time factor is ~0.1–0.3
+for the *medium* voices, and unlike ``kokoro_onnx`` it streams PCM as
+it synthesizes — so first-audio latency is a small fraction of the
+utterance length instead of the whole clip's synthesis time. That
+directly kills the TTS gaps we saw with ``kokoro_onnx`` on the AWS
+1-vCPU box.
 
 Two output modes:
 
@@ -79,14 +80,25 @@ def get_voice():
 def _synthesize_pcm_bytes(text: str) -> tuple[list[bytes], int]:
     """Synthesize ``text`` into a list of raw int16 PCM byte chunks.
 
-    Piper's ``synthesize_stream_raw`` is a Python generator that yields
-    little-endian int16 PCM as bytes. We drain it in a worker thread so
+    Piper 1.x (``piper1-gpl``) exposes ``PiperVoice.synthesize(text)`` as
+    a generator of ``AudioChunk`` dataclasses. Each chunk carries a
+    ``sample_rate`` and raw little-endian int16 PCM bytes via
+    ``audio_int16_bytes``. We drain the generator in a worker thread so
     the event loop stays responsive; each yielded chunk is a natural
-    streaming boundary.
+    streaming boundary (typically one sentence).
     """
     voice = get_voice()
-    sample_rate = voice.config.sample_rate
-    return list(voice.synthesize_stream_raw(text)), sample_rate
+    chunks: list[bytes] = []
+    sample_rate: Optional[int] = None
+    for chunk in voice.synthesize(text):
+        if sample_rate is None:
+            sample_rate = chunk.sample_rate
+        chunks.append(chunk.audio_int16_bytes)
+    if sample_rate is None:
+        # ``synthesize`` yielded nothing (empty text) — fall back to the
+        # voice's configured sample rate so downstream framing math works.
+        sample_rate = voice.config.sample_rate
+    return chunks, sample_rate
 
 
 async def _stream_piper_pcm(text, interrupt_event, on_audio_block):
@@ -130,7 +142,7 @@ def warm_up() -> None:
     """
     started_at = time.perf_counter()
     voice = get_voice()
-    for _ in voice.synthesize_stream_raw("hi"):
+    for _ in voice.synthesize("hi"):
         pass
     print(f"Piper warmed up in {time.perf_counter() - started_at:.2f} s")
 
