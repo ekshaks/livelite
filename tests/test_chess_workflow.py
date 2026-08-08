@@ -2,7 +2,7 @@
 
 These drive the real :class:`~chess_app.game_async.ChessWorkflow` through a real
 :class:`~server.core.async_controller_flow.AsyncControllerFlow` and a real
-:class:`~server.core.effects.EffectRunner`, with a small deterministic analyser
+:class:`~server.apps.effects.EffectRunner`, with a small deterministic analyser
 standing in for Stockfish so a whole game runs in milliseconds and the assertions
 are about behaviour, not timing.
 
@@ -51,8 +51,8 @@ from chess_app.events import (
 from chess_app.game_async import ChessWorkflow
 from chess_app.puzzles import Puzzle, PuzzleBook, load_puzzles
 
+from server.apps.effects import EffectRunner
 from server.core.async_controller_flow import AsyncControllerFlow
-from server.core.effects import EffectRunner
 
 PUZZLES_FILE = Path(__file__).resolve().parents[1] / "muapps" / "chess_app" / "puzzles.yml"
 
@@ -660,6 +660,142 @@ class ReviewFixTest(unittest.IsolatedAsyncioTestCase):
             for item in harness.outputs
             if item.feedback is not None and item.feedback.result == "game_over"
         ]
+
+
+class UIWiringTest(unittest.IsolatedAsyncioTestCase):
+    """The new mode header, wording toggle, and puzzle status feedbacks."""
+
+    from chess_app.events import WordingChanged
+
+    async def test_puzzle_session_emits_chess_mode_with_progress_and_wording(self):
+        second = Puzzle("mate-2", "6k1/5ppp/8/8/8/8/8/4R1K1 w - - 0 1", "mate", "Again.")
+        async with Harness(puzzle_workflow(MATE_PUZZLE, second)) as harness:
+            mode_events = self._mode_events(harness)
+            self.assertTrue(mode_events, "chess_mode should be pushed at session start")
+            first = mode_events[0]
+            self.assertEqual(first["mode"], "puzzle")
+            self.assertEqual(first["puzzle_count"], 2)
+            self.assertEqual(first["puzzle_index"], 0)
+            self.assertEqual(first["wording"], "beginner")
+
+    async def test_wording_toggle_switches_the_spoken_goal(self):
+        younger = Puzzle(
+            "young-1", MATE_PUZZLE.fen, "mate",
+            "Beginner sentence.",
+            idea="",
+            say_easy="Very simple sentence.",
+        )
+        book = PuzzleBook((younger, MATE_PUZZLE))
+        workflow = ChessWorkflow(book=book, mode="puzzle")
+        async with Harness(workflow) as harness:
+            self.assertTrue(harness.spoke("Beginner sentence."))
+            await harness.send(self.WordingChanged("young"))
+            await harness.send(MoveSpoken("a1a8"))  # solve puzzle 1
+            await harness.send(NextPuzzle())
+            # The second puzzle has no say_easy, so it falls back to the beginner
+            # sentence — that is the correct behaviour.
+            self.assertTrue(harness.spoke("White mates in one."))
+
+    async def test_puzzle_solved_and_wrong_statuses_reach_the_ui(self):
+        async with Harness(puzzle_workflow()) as harness:
+            await harness.send(MoveSpoken("g1g2"))  # wrong
+            self.assertIn("puzzle_wrong", harness.statuses)
+            await harness.send(MoveSpoken("a1a8"))  # right
+            self.assertIn("puzzle_solved", harness.statuses)
+
+    async def test_second_wrong_answer_reports_puzzle_answer(self):
+        async with Harness(puzzle_workflow()) as harness:
+            await harness.send(MoveSpoken("g1g2"))
+            await harness.send(MoveSpoken("g1h2"))
+            self.assertIn("puzzle_answer", harness.statuses)
+
+    async def test_wording_change_reemits_mode_message(self):
+        async with Harness(puzzle_workflow()) as harness:
+            before = len(self._mode_events(harness))
+            await harness.send(self.WordingChanged("young"))
+            after = self._mode_events(harness)
+            self.assertGreater(len(after), before)
+            self.assertEqual(after[-1]["wording"], "young")
+
+    async def test_new_game_from_puzzle_mode_updates_the_mode_pill(self):
+        # Reviewer bug: NewGame switched state.mode to play but never re-emitted
+        # chess_mode, so the browser kept showing the puzzle pill and buttons.
+        async with Harness(puzzle_workflow()) as harness:
+            modes = [event["mode"] for event in self._mode_events(harness)]
+            self.assertEqual(modes[-1], "puzzle")
+            await harness.send(NewGame())
+            modes = [event["mode"] for event in self._mode_events(harness)]
+            self.assertEqual(modes[-1], "play")
+
+    async def test_early_next_puzzle_click_is_not_lost(self):
+        # Reviewer bug: a Next-puzzle click sent while the solved move was still
+        # being analysed or coached was consumed by another wait loop and dropped.
+        second = Puzzle("mate-2", "6k1/5ppp/8/8/8/8/8/4R1K1 w - - 0 1", "mate", "Again.")
+        async with Harness(puzzle_workflow(MATE_PUZZLE, second)) as harness:
+            # Submit the winning move and the click together, so NextPuzzle
+            # arrives before the workflow reaches _wait_for_next_puzzle.
+            harness.flow.submit(MoveSpoken("a1a8"))
+            harness.flow.submit(NextPuzzle())
+            await harness.settle()
+            self.assertTrue(harness.spoke("Again."))
+            self.assertEqual(harness.last_fen, second.fen)
+
+    async def test_stale_next_puzzle_click_cannot_skip_a_fresh_puzzle(self):
+        # A click latched before a new puzzle appears must not auto-skip it.
+        second = Puzzle("mate-2", "6k1/5ppp/8/8/8/8/8/4R1K1 w - - 0 1", "mate", "Again.")
+        third = Puzzle("mate-3", MATE_PUZZLE.fen, "mate", "Third goal.")
+        async with Harness(puzzle_workflow(MATE_PUZZLE, second, third)) as harness:
+            harness.flow.submit(MoveSpoken("a1a8"))
+            harness.flow.submit(NextPuzzle())
+            await harness.settle()
+            self.assertEqual(harness.last_fen, second.fen)
+            self.assertFalse(harness.spoke("Third goal."))
+
+    def _mode_events(self, harness: Harness) -> list[dict]:
+        """Every ``chess_mode`` payload pushed to the browser, in order."""
+        return [
+            item.feedback.data
+            for item in harness.outputs
+            if item.feedback is not None and item.feedback.name == "chess_mode"
+        ]
+
+
+class ClientMessageMappingTest(unittest.TestCase):
+    """``app.client_event`` turns browser JSON into workflow events."""
+
+    def test_maps_all_supported_types(self):
+        from chess_app.app import client_event
+        from chess_app.events import (
+            MoveDragged,
+            NewGame,
+            NextPuzzle,
+            PositionObserved,
+            StopSession,
+            Undo,
+            WordingChanged,
+        )
+
+        cases = [
+            ({"type": "chess_move", "uci": "e2e4"}, MoveDragged("e2e4")),
+            ({"type": "chess_next_puzzle"}, NextPuzzle()),
+            ({"type": "chess_new_game", "side": "black"}, NewGame("black")),
+            ({"type": "chess_new_game"}, NewGame("white")),
+            ({"type": "chess_undo"}, Undo()),
+            ({"type": "chess_stop"}, StopSession()),
+            ({"type": "chess_wording", "level": "young"}, WordingChanged("young")),
+            ({"type": "chess_wording"}, WordingChanged("beginner")),
+            ({"type": "chess_set_position", "fen": "8/8/8/8/8/8/8/K6k w - - 0 1"},
+             PositionObserved("8/8/8/8/8/8/8/K6k w - - 0 1", source="browser")),
+        ]
+        for payload, expected in cases:
+            with self.subTest(payload=payload):
+                self.assertEqual(client_event(payload), expected)
+
+    def test_unknown_type_returns_none(self):
+        from chess_app.app import client_event
+        self.assertIsNone(client_event({"type": "not-ours"}))
+        self.assertIsNone(client_event(None))
+        self.assertIsNone(client_event("string"))
 
 
 if __name__ == "__main__":

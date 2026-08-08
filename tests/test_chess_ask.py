@@ -24,7 +24,7 @@ from chess_app.domain import (
 )
 from chess_app.events import ChessAsk
 
-from server.core.qa import Refusal, Verdict
+from server.apps.qa import Refusal, Verdict
 
 # 1.e4 e5 2.Nf3 Nc6 3.Bc4 Nd4 — black has just played a bad knight move.
 AFTER_ND4 = "r1bqkbnr/pppp1ppp/8/4p3/2BnP3/5N2/PPPP1PPP/RNBQK2R w KQkq - 5 4"

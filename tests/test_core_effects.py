@@ -5,15 +5,15 @@ from dataclasses import dataclass
 
 from reactivex.subject import Subject
 
-from server.core.app_output import AppOutput, output
-from server.core.effects import EffectRunner
+from server.apps.app_output import AppOutput, output
+from server.apps.effects import EffectRunner
 from server.core.events import AppFeedback
-from server.core.prompts import (
+from server.apps.prompts import (
     extract_json_object,
     load_prompt_instructions,
     load_prompt_request,
 )
-from server.core.qa import Ask, Refusal, Verdict, severity_for
+from server.apps.qa import Ask, Refusal, Verdict, severity_for
 from server.core.stream_dsl import Stream, SubGroup
 
 

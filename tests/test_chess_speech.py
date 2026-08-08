@@ -36,7 +36,7 @@ from chess_app.responses import (
     status_feedback,
 )
 
-from server.core.qa import Verdict
+from server.apps.qa import Verdict
 
 #: Knights on c3 and e3: both reach d5, so "knight to d five" is truly ambiguous.
 TWO_KNIGHTS = "4k3/8/8/8/8/2N1N3/8/4K3 w - - 0 1"
