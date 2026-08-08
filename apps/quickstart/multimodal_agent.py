@@ -92,6 +92,12 @@ def parse_args():
     )
     parser.add_argument("--llm-model", default="groq:meta-llama/llama-4-scout-17b-16e-instruct")
     parser.add_argument(
+        "--max-concurrent-sessions",
+        type=int,
+        default=2,
+        help="Reject WebRTC offers beyond this many active sessions (0 = unlimited).",
+    )
+    parser.add_argument(
         "--tts-provider",
         choices=["kokoro_fastapi", "kokoro_onnx"],
         default="kokoro_fastapi",
@@ -122,6 +128,7 @@ if __name__ == "__main__":
         rms_thresh=0.025,
         input_video_sample_interval=100,
         filter_gender=None,
+        max_concurrent_sessions=args.max_concurrent_sessions or None,
     )
 
     stt_kwargs = _parse_kv_list(args.stt_kwarg)
