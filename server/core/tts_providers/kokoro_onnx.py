@@ -43,6 +43,25 @@ def get_kokoro():
     return _kokoro
 
 
+def warm_up(voice: str = "af_sarah", lang: str = "en-us") -> None:
+    """Force Kokoro to load its ONNX weights and synthesize one tiny clip.
+
+    The first ``Kokoro.create`` call on a fresh process pays the ONNX
+    session-warmup cost (graph optimization, weight allocation, and the
+    eSpeak G2P initialization). On a 1-vCPU box that is 1–3 s and, when
+    it happens on the first user utterance, shows up as an audible gap
+    before the assistant starts speaking. Calling this once before the
+    server accepts connections moves the cost off the hot path.
+    """
+    import time as _time
+    started_at = _time.perf_counter()
+    kokoro = get_kokoro()
+    # A one-word phrase is enough to trip the full pipeline (G2P + inference)
+    # without producing meaningful audio.
+    kokoro.create("hi", voice=voice, speed=1.0, lang=lang)
+    print(f"Kokoro warmed up in {_time.perf_counter() - started_at:.2f} s")
+
+
 async def _create_kokoro_audio(text, voice="af_sarah", speed=1.0, lang="en-us"):
     """Synthesize ``text`` to a (samples, sample_rate) pair off the event loop."""
     loop = asyncio.get_event_loop()
