@@ -5,6 +5,7 @@ from .events import ClientTranscriptMessage
 from .stream_dsl import client_message_sink, expand_items, map_items
 from .tts_providers import KokoroFastApiTTSProvider, tts_sink
 from .tts_providers.kokoro_onnx import KokoroOnnxTTSProvider
+from .tts_providers.piper import PiperTTSProvider
 
 # Split after sentence/clause punctuation (plus any closing quotes/brackets)
 # followed by whitespace. Same boundary the spell app uses for its per-phrase
@@ -48,15 +49,22 @@ def add_text_sinks(stream, session, role, subs, log_title=None, max_log_chars=16
     )
 
 
-def _make_kokoro_provider(provider_name, output_mode, audio_track):
-    """Instantiate a Kokoro TTS provider for the requested output mode.
+# Providers that synthesize the whole clip before yielding audio: split the
+# input into short phrases so first-audio latency stays bounded.
+_NON_STREAMING_TTS_PROVIDERS = frozenset({"kokoro_onnx"})
 
-    Two providers are supported today:
 
-    * ``kokoro_fastapi`` (default) — talks to an external Kokoro-FastAPI HTTP
-      server (a second process). Streams PCM chunks; good on desktop.
-    * ``kokoro_onnx`` — runs the ONNX model in-process. Preferred on small
-      cloud servers because it avoids running a second PyTorch process.
+def _make_tts_provider(provider_name, output_mode, audio_track):
+    """Instantiate a TTS provider for the requested output mode.
+
+    Supported providers:
+
+    * ``kokoro_fastapi`` — external Kokoro-FastAPI HTTP server. Streams PCM
+      chunks; good on desktop where a second PyTorch process is fine.
+    * ``kokoro_onnx``   — in-process Kokoro (ONNX runtime). Whole-clip
+      synth; combine with :func:`split_spoken_phrases` to bound TTFB.
+    * ``piper``         — in-process Piper (rhasspy) TTS. Truly streaming
+      PCM output, small memory footprint, preferred on small CPU boxes.
     """
     if provider_name == "kokoro_fastapi":
         if output_mode == "local":
@@ -66,7 +74,11 @@ def _make_kokoro_provider(provider_name, output_mode, audio_track):
         if output_mode == "local":
             return KokoroOnnxTTSProvider(output="local")
         return KokoroOnnxTTSProvider(output="webrtc", audio_track=audio_track)
-    raise ValueError(f"Unknown Kokoro TTS provider: {provider_name}")
+    if provider_name == "piper":
+        if output_mode == "local":
+            return PiperTTSProvider(output="local")
+        return PiperTTSProvider(output="webrtc", audio_track=audio_track)
+    raise ValueError(f"Unknown TTS provider: {provider_name}")
 
 
 def add_kokoro_tts(
@@ -78,11 +90,38 @@ def add_kokoro_tts(
     provider="kokoro_fastapi",
     name_prefix="kokoro",
 ):
-    """Attach a Kokoro TTS sink to ``stream``.
+    """Attach a TTS sink to ``stream``.
+
+    Backwards-compatible alias for :func:`add_tts`. Kept as ``add_kokoro_tts``
+    so existing muapp entrypoints (spell, chess) don't need to be updated
+    beyond passing the new ``provider`` argument.
+    """
+    add_tts(
+        stream,
+        pc,
+        turn_signals,
+        subs=subs,
+        mode=mode,
+        provider=provider,
+        name_prefix=name_prefix,
+    )
+
+
+def add_tts(
+    stream,
+    pc,
+    turn_signals,
+    subs,
+    mode,
+    provider="kokoro_fastapi",
+    name_prefix="tts",
+):
+    """Attach a TTS sink to ``stream``.
 
     ``mode`` picks the output surface (``local`` = server speaker via
     sounddevice, ``browser`` = outbound WebRTC audio track). ``provider``
-    picks the synthesis backend (``kokoro_fastapi`` or ``kokoro_onnx``).
+    picks the synthesis backend (``kokoro_fastapi``, ``kokoro_onnx``, or
+    ``piper``).
     """
     if mode is None:
         return
@@ -98,11 +137,13 @@ def add_kokoro_tts(
     else:
         raise ValueError(f"Unknown TTS mode: {mode}")
 
-    tts_provider = _make_kokoro_provider(provider, output_mode, audio_track)
+    tts_provider = _make_tts_provider(provider, output_mode, audio_track)
 
-    if provider == "kokoro_onnx":
-        # kokoro_onnx synthesizes whole clips (no streaming), so split the
-        # text into short phrases to bound first-audio latency per request.
+    if provider in _NON_STREAMING_TTS_PROVIDERS:
+        # Whole-clip providers pay all their synthesis time before any audio
+        # comes out. Split into short phrases so first-audio latency stays
+        # bounded per request; streaming providers (piper, kokoro_fastapi)
+        # already emit PCM incrementally and don't need this.
         stream = stream | expand_items(split_spoken_phrases, name=f"{name_prefix}_phrase_split")
 
     name = f"{name_prefix}_{provider}_{mode}_tts"
