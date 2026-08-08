@@ -11,7 +11,6 @@ import json
 import os
 
 from .core.audio_utils import convert_and_resample_frame
-from .core.audio_utils import is_active_speaker
 from .core.webrtc_audio import AssistantAudioTrack
 from .core.session import SessionContext
 from .core.utils import rx_Subject as Subject # for input audio/video subjects
@@ -44,28 +43,29 @@ def _load_ice_servers(config):
     return [RTCIceServer(urls=[u.strip() for u in urls.split(",") if u.strip()])]
 
 async def setup_audio_track(pc, track: MediaStreamTrack, speech_turn_input, stop_event, config):
-    """Handle incoming audio track and process it through the pipeline."""
-    rms_thresh = config.get("rms_thresh", 0.02)
-    debug = config.get("debug", False)
+    """Handle incoming audio track and process it through the pipeline.
+
+    Every buffered chunk is forwarded straight to the speech-turn subject.
+    Silero VAD downstream is the real speech gate — it already rejects
+    silence cheaply (~1 ms per 500 ms chunk on onnxruntime), so a second
+    RMS/librosa pre-filter here just spent CPU on a 1-vCPU box and printed
+    per-chunk debug lines that noised up the logs.
+    """
     audio_buffer_size = config.get("input_audio_buffer_size", 8000)
 
     buffer = np.array([], dtype=np.int16)
     bsize = audio_buffer_size #audio buffer size, for sending to pipeline
     sr = 16000
-    
+
     while not stop_event.is_set():
         try:
             frame = await track.recv()
             chunk = convert_and_resample_frame(frame, target_sample_rate=sr)
             buffer = np.concatenate([buffer, chunk])
-            
+
             # Process complete chunks
             while len(buffer) >= bsize:
-                chunk_out = buffer[:bsize]
-                active = is_active_speaker(chunk_out, sr, rms_thresh=rms_thresh, debug=debug, 
-                            filter_gender=config.get("filter_gender", None))
-                if active:
-                    speech_turn_input.on_next(chunk_out)
+                speech_turn_input.on_next(buffer[:bsize])
                 buffer = buffer[bsize:]
                 
         except MediaStreamError:
