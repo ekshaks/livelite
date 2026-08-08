@@ -1,6 +1,6 @@
 import re
 
-from .logging_utils import log_text_block
+from .logging_utils import log_text_block, monitor_log
 from .events import ClientTranscriptMessage
 from .stream_dsl import client_message_sink, expand_items, map_items
 from .tts_providers import KokoroFastApiTTSProvider, tts_sink
@@ -54,6 +54,21 @@ def add_text_sinks(stream, session, role, subs, log_title=None, max_log_chars=16
 _NON_STREAMING_TTS_PROVIDERS = frozenset({"kokoro_onnx"})
 
 
+_TTS_PROVIDER_ALIASES = {"kokoro": "kokoro_fastapi"}
+
+
+def _resolve_tts_provider_name(provider_name):
+    """Canonicalize a TTS provider identifier (translating legacy aliases).
+
+    Historically the muapps configs used ``provider: kokoro`` to mean
+    "Kokoro-FastAPI HTTP server". Newer providers (``kokoro_onnx``,
+    ``piper``) introduced explicit names, so the bare ``"kokoro"`` value is
+    treated as an alias to keep old configs working without a silent switch
+    in behavior.
+    """
+    return _TTS_PROVIDER_ALIASES.get(provider_name, provider_name)
+
+
 def _make_tts_provider(provider_name, output_mode, audio_track):
     """Instantiate a TTS provider for the requested output mode.
 
@@ -61,11 +76,13 @@ def _make_tts_provider(provider_name, output_mode, audio_track):
 
     * ``kokoro_fastapi`` — external Kokoro-FastAPI HTTP server. Streams PCM
       chunks; good on desktop where a second PyTorch process is fine.
+      The legacy alias ``"kokoro"`` maps here.
     * ``kokoro_onnx``   — in-process Kokoro (ONNX runtime). Whole-clip
       synth; combine with :func:`split_spoken_phrases` to bound TTFB.
     * ``piper``         — in-process Piper (rhasspy) TTS. Truly streaming
       PCM output, small memory footprint, preferred on small CPU boxes.
     """
+    provider_name = _resolve_tts_provider_name(provider_name)
     if provider_name == "kokoro_fastapi":
         if output_mode == "local":
             return KokoroFastApiTTSProvider(mode="local")
@@ -137,16 +154,21 @@ def add_tts(
     else:
         raise ValueError(f"Unknown TTS mode: {mode}")
 
-    tts_provider = _make_tts_provider(provider, output_mode, audio_track)
+    canonical_provider = _resolve_tts_provider_name(provider)
+    tts_provider = _make_tts_provider(canonical_provider, output_mode, audio_track)
+    monitor_log(
+        f"tts sink attached provider_input={provider} "
+        f"provider_effective={canonical_provider} mode={mode} name_prefix={name_prefix}"
+    )
 
-    if provider in _NON_STREAMING_TTS_PROVIDERS:
+    if canonical_provider in _NON_STREAMING_TTS_PROVIDERS:
         # Whole-clip providers pay all their synthesis time before any audio
         # comes out. Split into short phrases so first-audio latency stays
         # bounded per request; streaming providers (piper, kokoro_fastapi)
         # already emit PCM incrementally and don't need this.
         stream = stream | expand_items(split_spoken_phrases, name=f"{name_prefix}_phrase_split")
 
-    name = f"{name_prefix}_{provider}_{mode}_tts"
+    name = f"{name_prefix}_{canonical_provider}_{mode}_tts"
     stream.to(
         tts_sink(tts_provider, interrupts=turn_signals, name=name),
         name=name,
