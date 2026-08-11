@@ -1,5 +1,5 @@
 from .llm_utils import call_llm, create_agent, split_spoken_written
-from .pipeline_helpers import add_kokoro_tts, add_text_sinks
+from .pipeline_helpers import add_tts, add_text_sinks
 from .stream_dsl import (
     Stream,
     SubGroup,
@@ -20,12 +20,14 @@ async def run_multimodal_session(
     stt_model_size="tiny",
     stt_model=None,
     stt_language="en",
+    stt_kwargs=None,
     llm_model,
     prompts_path,
     prompt_id="visual_solver",
     agent_name="Agent",
     llm_stage_name="multimodal_llm",
     tts_mode=None,
+    tts_provider="kokoro_fastapi",
 ):
     await session.wait_until_ready()
 
@@ -45,6 +47,7 @@ async def run_multimodal_session(
         model=stt_model,
         model_size=stt_model_size,
         language=stt_language,
+        **(stt_kwargs or {}),
     )
     user_text = transcripts | final_transcript_text()
 
@@ -66,7 +69,14 @@ async def run_multimodal_session(
 
     add_text_sinks(user_text, session, role="user", subs=subs)
     add_text_sinks(assistant_written, session, role="assistant", subs=subs)
-    add_kokoro_tts(assistant_spoken, pc, turn.signals, subs=subs, mode=tts_mode)
+    add_tts(
+        assistant_spoken,
+        pc,
+        turn.signals,
+        subs=subs,
+        mode=tts_mode,
+        provider=tts_provider,
+    )
 
     try:
         await session.closed.wait()

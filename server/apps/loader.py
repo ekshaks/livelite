@@ -6,18 +6,43 @@ from typing import Any
 
 from server.core.app_config import app_section, load_app_config
 
+from .config_merge import active_profiles, load_bundle_layers, load_infra_layers
 from .registry import APP_ID_RE, AppDefinition, AppRegistry
 
 
 def load_app_catalog(path: Path) -> tuple[AppRegistry, dict[str, Any]]:
-    catalog_path = Path(path).resolve()
-    catalog = load_app_config(catalog_path)
-    if catalog.get("schema") != 1:
-        raise ValueError("App catalog schema must be 1")
+    """Load ``muapps/apps.yml`` and every app bundle it lists.
 
-    entries = catalog.get("apps")
+    Schema 1 (legacy): the catalog file is used as-is. No profile overrides
+    and no ``defaults:`` block; per-bundle configs are loaded verbatim.
+
+    Schema 2: the catalog's ``defaults:`` block plus any ``apps.<profile>.yml``
+    files (selected by ``MULIVE_PROFILE``, default ``local``) form a shared
+    infra layer that is deep-merged under every bundle's config. Per-bundle
+    ``config.<profile>.yml`` files layer on top of the bundle's ``config.yml``.
+    """
+    catalog_path = Path(path).resolve()
+    raw_catalog = load_app_config(catalog_path)
+    schema = raw_catalog.get("schema")
+    if schema not in (1, 2):
+        raise ValueError("App catalog schema must be 1 or 2")
+
+    entries = raw_catalog.get("apps")
     if not isinstance(entries, list):
         raise ValueError("App catalog apps must be a list")
+
+    if schema == 2:
+        profiles = active_profiles()
+        infra, _ = load_infra_layers(catalog_path, raw_catalog, profiles)
+        catalog = {**infra}
+        catalog["schema"] = schema
+        if raw_catalog.get("users") is not None:
+            catalog["users"] = raw_catalog["users"]
+        catalog["apps"] = entries
+    else:
+        profiles = ()
+        infra = {}
+        catalog = raw_catalog
 
     registry = AppRegistry()
     for index, entry in enumerate(entries):
@@ -30,7 +55,14 @@ def load_app_catalog(path: Path) -> tuple[AppRegistry, dict[str, Any]]:
                 entry["path"],
                 directory=True,
             )
-            registry.register(load_app_bundle(bundle_dir, enabled=enabled))
+            registry.register(
+                load_app_bundle(
+                    bundle_dir,
+                    enabled=enabled,
+                    infra=infra,
+                    profiles=profiles,
+                )
+            )
         except Exception as exc:
             if not enabled:
                 continue
@@ -49,7 +81,14 @@ def load_app_catalog(path: Path) -> tuple[AppRegistry, dict[str, Any]]:
     return registry, catalog
 
 
-def load_app_bundle(bundle_dir: Path, *, enabled: bool = True) -> AppDefinition:
+def load_app_bundle(
+    bundle_dir: Path,
+    *,
+    enabled: bool = True,
+    infra: dict[str, Any] | None = None,
+    profiles: tuple[str, ...] = (),
+) -> AppDefinition:
+    """Load one app bundle, merging shared infra + per-profile overrides."""
     bundle_dir = Path(bundle_dir).resolve()
     manifest = load_app_config(bundle_dir / "app.yml")
     if manifest.get("schema") != 1:
@@ -77,7 +116,10 @@ def load_app_bundle(bundle_dir: Path, *, enabled: bool = True) -> AppDefinition:
         bundle_dir,
         _required_text(backend, "config", bundle_dir),
     )
-    config = load_app_config(config_path)
+    if infra or profiles:
+        config, _ = load_bundle_layers(bundle_dir, config_path, infra or {}, profiles)
+    else:
+        config = load_app_config(config_path)
     session_runner_factory = _load_entrypoint(bundle_dir, entrypoint)
 
     ui = manifest.get("ui") or {}

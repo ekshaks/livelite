@@ -102,9 +102,25 @@ class Server:
     async def offer_handler(self, request: Request):
         """Handle WebRTC offer and set up media processing pipeline."""
         pc = None
+        params = await request.json()
+        # Concurrency cap: on a small AWS box CPU-bound STT/TTS cannot
+        # multiplex many sessions in real time. Default is None (no cap —
+        # previous behaviour); deployments opt in via config. Checked after
+        # the await above so check -> create -> add cannot interleave with
+        # another offer on the event loop.
+        max_sessions = self.config.get("max_concurrent_sessions")
+        if max_sessions is not None and len(self.pcs) >= max_sessions:
+            print(f"Rejecting offer: at capacity ({len(self.pcs)}/{max_sessions})")
+            raise HTTPException(
+                status_code=503,
+                detail=f"Server busy: {len(self.pcs)} of {max_sessions} sessions active.",
+            )
         try:
-            params = await request.json()
-            pc = pc_session_setup(self.run_session, self.config)
+            pc = pc_session_setup(
+                self.run_session,
+                self.config,
+                on_peer_close=self.pcs.discard,
+            )
             self.pcs.add(pc)
             
             offer = RTCSessionDescription(sdp=params["sdp"], type=params["type"])

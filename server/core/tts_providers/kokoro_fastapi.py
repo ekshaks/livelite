@@ -1,4 +1,5 @@
 import asyncio
+import os
 import time
 from typing import Any, Optional
 
@@ -8,6 +9,17 @@ from openai import AsyncOpenAI
 from ..logging_utils import monitor_log, monitor_time
 
 KOKORO_PCM_SAMPLE_RATE = 24000
+
+DEFAULT_KOKORO_FASTAPI_URL = "http://localhost:8880/v1"
+
+
+def _kokoro_fastapi_base_url() -> str:
+    """Return the Kokoro-FastAPI base URL.
+
+    Reads ``KOKORO_FASTAPI_URL`` at call time so the same process can pick
+    up a new value (e.g. tests / deployment shims) without a re-import.
+    """
+    return os.environ.get("KOKORO_FASTAPI_URL", DEFAULT_KOKORO_FASTAPI_URL)
 
 
 def _log_tts_metrics(timings, chunk_count):
@@ -37,7 +49,7 @@ async def _tts_kokoro_stream_chunks(text, interrupt_event, on_audio_block, clien
 
     try:
         monitor_log("tts provider=kokoro event=request_start")
-        client = client or AsyncOpenAI(base_url="http://localhost:8880/v1", api_key="not-needed")
+        client = client or AsyncOpenAI(base_url=_kokoro_fastapi_base_url(), api_key="not-needed")
         async with client.audio.speech.with_streaming_response.create(
             model="kokoro",
             voice="af_sky+af_bella",
@@ -57,7 +69,14 @@ async def _tts_kokoro_stream_chunks(text, interrupt_event, on_audio_block, clien
                 await on_audio_block(audio_block, samplerate)
                 chunk_count += 1
     except Exception as exc:
-        print(f"Error during TTS streaming: {exc}")
+        # Typed logging: the previous 'Error during TTS streaming: <exc>'
+        # collapsed httpx.ConnectError, 5xx responses, and JSON errors into
+        # the same message, which made diagnosing 'no browser audio' hard.
+        print(
+            f"Error during Kokoro-FastAPI TTS streaming: "
+            f"{type(exc).__module__}.{type(exc).__name__}: {exc} "
+            f"(base_url={_kokoro_fastapi_base_url()})"
+        )
     finally:
         timings["end"] = time.perf_counter()
         _log_tts_metrics(timings, chunk_count)
@@ -129,7 +148,7 @@ class KokoroFastApiTTSProvider:
     def __init__(self, mode: str = "local", audio_track: Optional[Any] = None):
         self.mode = mode
         self.audio_track = audio_track
-        self.client = AsyncOpenAI(base_url="http://localhost:8880/v1", api_key="not-needed")
+        self.client = AsyncOpenAI(base_url=_kokoro_fastapi_base_url(), api_key="not-needed")
 
     async def speak(self, text: str, interrupt_event: asyncio.Event) -> None:
         if self.mode == "local":

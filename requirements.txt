@@ -1,3 +1,7 @@
+aiortc
+aiohttp
+fastapi
+uvicorn
 pydub
 pyaudio
 asyncio
@@ -9,10 +13,12 @@ torch
 faster-whisper
 google-genai
 PyYAML
+pillow
 librosa
 silero-vad
 onnxruntime
 kokoro-onnx
+piper-tts
 sounddevice
 text2num>=3,<4
 chess>=1.11,<2

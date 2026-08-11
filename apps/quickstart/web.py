@@ -1,7 +1,7 @@
 import argparse
 
 from server.core.server_config import web_config
-from server.core.pipeline_helpers import add_kokoro_tts, add_text_sinks
+from server.core.pipeline_helpers import add_tts, add_text_sinks
 from server.core.stream_dsl import (
     Stream,
     SubGroup,
@@ -30,7 +30,7 @@ async def run_session(session, tts_mode=None, stt_provider="mlx", stt_model=None
     user_text = transcripts | final_transcript_text()
 
     add_text_sinks(user_text, session, role="user", subs=subs)
-    add_kokoro_tts(user_text, session.pc, turn.signals, subs=subs, mode=tts_mode)
+    add_tts(user_text, session.pc, turn.signals, subs=subs, mode=tts_mode)
 
     try:
         await session.closed.wait()
