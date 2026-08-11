@@ -159,6 +159,31 @@ def _dump_stt_audio(segment, directory: str, rate: int = 16000) -> Path:
     return path
 
 
+def check_stt_provider(provider: str) -> None:
+    """Check that an ``stt.provider`` value can run in this installation.
+
+    Call this while an app is loading, next to the other "can this app run here?"
+    checks. A provider whose package is missing then reports itself once, in the
+    server log and on the dashboard, instead of turning every single thing the user
+    says into an empty transcript.
+
+    Args:
+        provider: The configured provider name.
+
+    Raises:
+        ValueError: When the provider is unknown.
+        RuntimeError: When a local Whisper backend's package is not installed.
+    """
+    provider = (provider or "").lower()
+    if provider in {"mlx", "faster_whisper"}:
+        from .stt.whisper import require_backend
+
+        require_backend(provider)
+        return
+    if provider != "deepgram":
+        raise ValueError(f"Unknown STT provider: {provider}")
+
+
 def stt(
     provider: str = "mlx",
     *,
