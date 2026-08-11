@@ -1,12 +1,18 @@
 """Local Whisper STT providers and their Stream DSL adapter."""
 
 import asyncio
+import importlib.util
 import time
 
 import numpy as np
 
 from ..events import TranscriptEvent
-from ..logging_utils import monitor_time
+from ..logging_utils import monitor_log, monitor_time
+
+#: The pip package each local backend needs. ``mlx-whisper`` is Apple-Silicon only
+#: and is not in requirements.txt, so a config asking for it on another machine —
+#: or on a Python version it has no wheels for — must say so instead of going deaf.
+BACKEND_PACKAGES = {"mlx": "mlx_whisper", "faster_whisper": "faster_whisper"}
 
 
 # Cache Whisper models keyed by (mode, model_size, model_id, frozen kwargs).
@@ -111,6 +117,73 @@ class WhisperSTT:
         return result
 
 
+def require_backend(mode: str) -> None:
+    """Check that the chosen Whisper backend can actually be imported.
+
+    Without this the missing import surfaces one utterance at a time, inside a
+    worker thread, where it is turned into an empty transcript — so the app looks
+    like it simply cannot hear, with nothing on screen to explain why.
+
+    Args:
+        mode: ``mlx`` or ``faster_whisper``.
+
+    Raises:
+        ValueError: When the mode is not a known backend.
+        RuntimeError: When the backend's package is not installed.
+    """
+    package = BACKEND_PACKAGES.get(mode)
+    if package is None:
+        raise ValueError(f"Unknown Whisper mode: {mode}")
+    if importlib.util.find_spec(package) is None:
+        alternative = "faster_whisper" if mode == "mlx" else "mlx"
+        raise RuntimeError(
+            f"STT provider '{mode}' needs the {package.replace('_', '-')} package, "
+            f"which is not installed. Install it, or set stt.provider to "
+            f"'{alternative}' in the app config."
+        )
+
+
+def notify(on_status, result: str, data: dict) -> None:
+    """Report a status to the browser without letting it break the pipeline.
+
+    The callback ends up writing to a WebRTC data channel, which can close at any
+    moment. An exception here would error the transcript stream — and that stream is
+    never resubscribed, so a closing channel could leave a live session deaf.
+
+    Args:
+        on_status: The ``(result, data)`` callback, or None.
+        result: ``loading`` / ``ready`` / ``error``.
+        data: Extra fields for the browser.
+    """
+    if on_status is None:
+        return
+    try:
+        on_status(result, data)
+    except Exception as exc:  # noqa: BLE001 - a status message is never worth a crash
+        monitor_log(f"stt status callback failed result={result} error={type(exc).__name__}: {exc}")
+
+
+def transcription_failed(reason: str, model_size: str, on_status) -> TranscriptEvent:
+    """Report one failed transcription and keep the stream alive.
+
+    Returning an empty final transcript rather than raising matters: the transcript
+    stream feeds the controller's only speech input, and a stream that errors is
+    never resubscribed — one bad segment would leave the session deaf for good. The
+    failure is logged and pushed to the browser instead of vanishing.
+
+    Args:
+        reason: What went wrong, in words.
+        model_size: The model that was being used, for the log line.
+        on_status: Optional ``(result, data)`` callback into the browser.
+
+    Returns:
+        An empty final :class:`~server.core.events.TranscriptEvent`.
+    """
+    monitor_log(f"stt transcription failed model={model_size} reason={reason}")
+    notify(on_status, "error", {"model_size": model_size, "reason": reason})
+    return TranscriptEvent(text="", is_final=True)
+
+
 def whisper_stt(
     name: str = "whisper_stt",
     model_size: str = "tiny",
@@ -120,45 +193,45 @@ def whisper_stt(
     on_status=None,
     **kwargs,
 ):
-    """Create a final-transcript stage backed by a local Whisper provider."""
+    """Create a final-transcript stage backed by a local Whisper provider.
 
-    if mode == "mlx":
-        from .mlx import MlxPinnedWhisper
-        from ..stream_dsl import _dump_stt_audio, async_map_stage
+    Args:
+        name: Stage name, for logs.
+        model_size: Whisper model size or id.
+        mode: ``mlx`` or ``faster_whisper``.
+        debug_audio_dir: Optional directory to dump each segment into.
+        timeout_s: How long one segment may take before it is given up on.
+        on_status: Optional ``(result, data)`` callback: ``loading`` / ``ready`` /
+            ``error``, forwarded to the browser.
+        **kwargs: Backend options (``compute_type``, ``cpu_threads``, ``language``).
 
-        mlx_stt = MlxPinnedWhisper(model_size=model_size, **kwargs)
+    Returns:
+        A Stream DSL stage mapping audio segments to final transcripts.
 
-        async def transcribe(segment):
-            if debug_audio_dir:
-                _dump_stt_audio(segment, debug_audio_dir)
-            if on_status and mlx_stt.is_loading():
-                on_status("loading", {"model_size": model_size})
-            try:
-                text = await asyncio.wait_for(mlx_stt.transcribe(segment), timeout=timeout_s)
-            except asyncio.TimeoutError:
-                if on_status:
-                    on_status("error", {"model_size": model_size, "reason": f"STT timed out after {timeout_s:g}s"})
-                return TranscriptEvent(text="", is_final=True)
-            except Exception as exc:
-                if on_status:
-                    on_status("error", {"model_size": model_size, "reason": str(exc)})
-                return TranscriptEvent(text="", is_final=True)
-            if on_status:
-                on_status("ready", {"model_size": model_size})
-            return TranscriptEvent(text=text or "", is_final=True)
-
-        return async_map_stage(transcribe, name=name, on_dispose=mlx_stt.shutdown)
-
+    Raises:
+        RuntimeError: When the backend package is not installed.
+        ValueError: When ``mode`` is not a known backend.
+    """
+    require_backend(mode)
     from ..stream_dsl import _dump_stt_audio, async_map_stage
+    from .pinned import PinnedWhisper
 
-    stt = WhisperSTT(mode=mode, model_size=model_size, **kwargs)
+    # Both backends run on one pinned worker thread: model loading and inference stay
+    # off the event loop, and only one segment is ever being transcribed at a time.
+    backend = PinnedWhisper(mode=mode, model_size=model_size, **kwargs)
 
     async def transcribe(segment):
-        # Whisper inference is blocking; run it off the event loop so audio
-        # receive and WebRTC pacing keep running during transcription.
         if debug_audio_dir:
             _dump_stt_audio(segment, debug_audio_dir)
-        text = await asyncio.to_thread(stt, segment)
+        if backend.is_loading():
+            notify(on_status, "loading", {"model_size": model_size})
+        try:
+            text = await asyncio.wait_for(backend.transcribe(segment), timeout=timeout_s)
+        except asyncio.TimeoutError:
+            return transcription_failed(f"timed out after {timeout_s:g}s", model_size, on_status)
+        except Exception as exc:  # noqa: BLE001 - one bad segment must not deafen us
+            return transcription_failed(f"{type(exc).__name__}: {exc}", model_size, on_status)
+        notify(on_status, "ready", {"model_size": model_size})
         return TranscriptEvent(text=text or "", is_final=True)
 
-    return async_map_stage(transcribe, name=name)
+    return async_map_stage(transcribe, name=name, on_dispose=backend.shutdown)

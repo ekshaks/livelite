@@ -1,11 +1,8 @@
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
 import os
 import threading
 import time
 
 from ..logging_utils import monitor_time
-
 
 DEBUG_MLX_STT = os.getenv("DEBUG_MLX_STT") == "1"
 
@@ -60,51 +57,3 @@ def infer_mlx(audio_data, model):
     if DEBUG_MLX_STT:
         monitor_time("stt", "decode", time.perf_counter() - start, provider="mlx")
     return result[0].text
-
-
-class MlxPinnedWhisper:
-    """Run Whisper MLX model load and inference on one dedicated thread."""
-
-    def __init__(self, model_size: str = "tiny", **kwargs):
-        self.model_size = model_size
-        self.kwargs = kwargs
-        self.executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="mlx-whisper")
-        _log(f"[mlx-stt] creating pinned worker from thread={threading.get_ident()}")
-        self._stt_future = self.executor.submit(self._load)
-        self._stt_future.add_done_callback(self._log_load_result)
-
-    def _log_load_result(self, future):
-        if not DEBUG_MLX_STT:
-            return
-        if future.cancelled():
-            _log("[mlx-stt] load future done cancelled=True")
-            return
-        exc = future.exception()
-        _log(f"[mlx-stt] load future done cancelled=False exc={exc!r}")
-
-    def _load(self):
-        from .whisper import WhisperSTT
-
-        _log(f"[mlx-stt] worker load start thread={threading.get_ident()}")
-        stt = WhisperSTT(mode="mlx", model_size=self.model_size, **self.kwargs)
-        _log(f"[mlx-stt] worker load done thread={threading.get_ident()}")
-        return stt
-
-    def _infer(self, segment):
-        _log(f"[mlx-stt] worker infer requested segment_shape={getattr(segment, 'shape', None)} thread={threading.get_ident()}")
-        stt = self._stt_future.result()
-        _log("[mlx-stt] worker infer model ready")
-        result = stt(segment)
-        _log(f"[mlx-stt] worker infer done text_len={len(result or '')}")
-        return result
-
-    def is_loading(self) -> bool:
-        return not self._stt_future.done()
-
-    async def transcribe(self, segment):
-        _log(f"[mlx-stt] enqueue transcribe segment_shape={getattr(segment, 'shape', None)}")
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(self.executor, self._infer, segment)
-
-    def shutdown(self):
-        self.executor.shutdown(wait=False, cancel_futures=True)
