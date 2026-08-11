@@ -18,6 +18,7 @@ from chess_app.events import (
     ConfirmMove,
     MoveSpoken,
     NewGame,
+    NextPuzzle,
     QuestionAsked,
     StopSession,
     TakeBackMove,
@@ -151,6 +152,19 @@ class CommandSpeechTests(unittest.TestCase):
         self.check("take it back", TakeBackMove)
         self.check("yes", ConfirmMove)
         self.check("no wait", TakeBackMove)
+
+    def test_commands_containing_number_words_still_match(self):
+        # normalise() rewrites "one" as "1", so a command written in English can
+        # only match if it is normalised the same way before comparing.
+        self.check("next one", NextPuzzle)
+        self.check("not that one", TakeBackMove)
+
+    def test_a_plain_no_is_a_take_back(self):
+        # A child answering "no" to "do you still want to play it?" must not fall
+        # through to the move resolver, which would invent a move from one word.
+        self.check("no", TakeBackMove)
+        self.check("no thanks", TakeBackMove)
+        self.check("nope", TakeBackMove)
 
     def test_a_command_may_carry_trailing_words(self):
         self.check("new game please", NewGame)

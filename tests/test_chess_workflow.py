@@ -230,6 +230,31 @@ class Harness:
             self.flow.submit(event)
         await self.settle()
 
+    async def rest(self, seconds: float = 0.3) -> None:
+        """Give real time to effects that really do sleep, then settle.
+
+        Args:
+            seconds: How long to wait.
+        """
+        await asyncio.sleep(seconds)
+        await self.settle()
+
+    async def until(self, condition, seconds: float = 3.0) -> None:
+        """Wait until ``condition()`` is true, then settle. Never fails by itself.
+
+        Waiting for the thing under test rather than for a fixed delay keeps the
+        timing tests honest on a slow machine.
+
+        Args:
+            condition: Zero-argument predicate.
+            seconds: How long to keep trying.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + seconds
+        while loop.time() < deadline and not condition():
+            await asyncio.sleep(0.01)
+        await self.settle()
+
     async def settle(self, rounds: int = 40) -> None:
         """Let queued tasks and effects run to quiescence.
 
@@ -264,6 +289,53 @@ class Harness:
     def spoke(self, fragment: str) -> bool:
         """Whether any spoken line contains ``fragment``."""
         return any(fragment in line for line in self.said)
+
+
+async def slow_analyse(request: RequestAnalysis) -> AnalysisReady:
+    """Answer an analysis request, but only after real time has passed.
+
+    Stockfish takes a moment, and a child does not wait politely. This lets a test
+    say or drag something *while* the coach is still thinking.
+
+    Args:
+        request: The analysis request.
+
+    Returns:
+        The same reply the immediate analyser would give.
+    """
+    await asyncio.sleep(0.05)
+    return await analyse(request)
+
+
+async def slow_coach_line(request: RequestCoachLine) -> CoachLineReady:
+    """Phrase a verdict, but only after real time has passed.
+
+    Args:
+        request: The coaching request.
+
+    Returns:
+        The same reply the immediate coach would give.
+    """
+    await asyncio.sleep(0.05)
+    return await coach_line(request)
+
+
+def harness_with(workflow: ChessWorkflow, **handlers) -> "Harness":
+    """Build a harness with some effect handlers replaced.
+
+    Args:
+        workflow: The controller under test.
+        **handlers: Any of ``analysis``, ``engine``, ``coach``.
+
+    Returns:
+        The harness, not yet started.
+    """
+    harness = Harness(workflow)
+    harness.effects = EffectRunner(harness.flow.submit, name="test_effects")
+    harness.effects.register(RequestAnalysis, handlers.get("analysis", analyse))
+    harness.effects.register(RequestEngineMove, handlers.get("engine", engine_move))
+    harness.effects.register(RequestCoachLine, handlers.get("coach", coach_line))
+    return harness
 
 
 MATE_PUZZLE = Puzzle(
@@ -420,6 +492,163 @@ class BlunderGuardTest(unittest.IsolatedAsyncioTestCase):
             await harness.send(MoveDragged("b8c6"))
             self.assertTrue(harness.spoke("You played"))
             self.assertEqual(harness.said.count("[coach_guard] check"), 1)
+
+
+class ObjectionProtocolTest(unittest.IsolatedAsyncioTestCase):
+    """What may happen after the coach objects, and after a what-if preview.
+
+    Both are the same promise: a move the child only *talked about* is never
+    played until they say so.
+    """
+
+    async def test_a_substituted_move_is_the_one_that_gets_played(self):
+        # The child is warned about d8h4, changes their mind and plays b8c6.
+        # Playing the warned move here would be the app overruling the child.
+        async with Harness(play_workflow(QUEEN_HANGS)) as harness:
+            await harness.send(MoveSpoken("d8h4"))
+            await harness.send(MoveDragged("b8c6"))
+            board = chess.Board(harness.last_fen)
+            self.assertEqual(board.piece_at(chess.C6), chess.Piece(chess.KNIGHT, chess.BLACK))
+            self.assertEqual(board.piece_at(chess.D8), chess.Piece(chess.QUEEN, chess.BLACK))
+            self.assertIsNone(board.piece_at(chess.H4))
+
+    async def test_answering_the_coachs_question_does_not_play_the_move(self):
+        # coach_guard ends with a question ("what could I do then?"), so the child
+        # may well answer in words. That is not a yes.
+        async with Harness(play_workflow(QUEEN_HANGS)) as harness:
+            await harness.send(MoveSpoken("d8h4"))
+            await harness.send(UnclearInput("your knight would take my queen"))
+            self.assertFalse(harness.spoke("You played"))
+            self.assertEqual(harness.last_fen, QUEEN_HANGS)
+            self.assertTrue(harness.spoke("Say yes to play it"))
+
+    async def test_repeating_the_warned_move_counts_as_a_yes(self):
+        # Insisting on the same move is the clearest possible confirmation.
+        async with Harness(play_workflow(QUEEN_HANGS)) as harness:
+            await harness.send(MoveSpoken("d8h4"))
+            await harness.send(MoveSpoken("d8h4"))
+            self.assertTrue(harness.spoke("You played"))
+            self.assertEqual(
+                chess.Board(harness.last_fen).piece_at(chess.H4),
+                chess.Piece(chess.QUEEN, chess.BLACK),
+            )
+            self.assertEqual(harness.said.count("[coach_guard] check"), 1)
+
+    async def test_a_what_if_answer_can_be_turned_into_the_move(self):
+        # "What if I play e4?" ... "Then I can do X." ... "Okay, do it."
+        async with Harness(play_workflow()) as harness:
+            await harness.send(QuestionAsked("whatif", action_text="e2e4"))
+            await harness.send(ConfirmMove())
+            self.assertTrue(harness.spoke("You played"))
+            self.assertEqual(
+                chess.Board(harness.last_fen).piece_at(chess.E4),
+                chess.Piece(chess.PAWN, chess.WHITE),
+            )
+
+    async def test_a_previewed_move_is_not_objected_to_twice(self):
+        # The what-if answer already said what the move allows, so repeating it as
+        # a warning would be nagging.
+        async with Harness(play_workflow(QUEEN_HANGS)) as harness:
+            await harness.send(QuestionAsked("whatif", action_text="d8h4"))
+            self.assertTrue(harness.spoke("coach_whatif"))
+            await harness.send(ConfirmMove())
+            self.assertTrue(harness.spoke("You played"))
+            self.assertFalse(harness.spoke("coach_guard"))
+
+    async def test_yes_with_nothing_to_confirm_asks_for_a_move(self):
+        async with Harness(play_workflow()) as harness:
+            await harness.send(ConfirmMove())
+            self.assertTrue(harness.spoke("Say the move"))
+            self.assertEqual(harness.last_fen, chess.Board().fen())
+
+    async def test_dropping_a_preview_forgets_it(self):
+        async with Harness(play_workflow()) as harness:
+            await harness.send(QuestionAsked("whatif", action_text="e2e4"))
+            await harness.send(TakeBackMove())
+            await harness.send(ConfirmMove())
+            self.assertFalse(harness.spoke("You played"))
+            self.assertEqual(harness.last_fen, chess.Board().fen())
+
+    async def test_a_move_made_while_the_guard_is_thinking_is_the_one_played(self):
+        # The guard checks d8h4 silently. The child does not wait: they drag b8c6.
+        # Dropping that drag would mean playing a move they had moved on from.
+        harness = harness_with(play_workflow(QUEEN_HANGS), analysis=slow_analyse)
+        async with harness:
+            await harness.send(MoveSpoken("d8h4"))
+            await harness.send(MoveDragged("b8c6"))
+            await harness.until(lambda: harness.spoke("You played"))
+            board = chess.Board(harness.last_fen)
+            self.assertEqual(board.piece_at(chess.C6), chess.Piece(chess.KNIGHT, chess.BLACK))
+            self.assertEqual(board.piece_at(chess.D8), chess.Piece(chess.QUEEN, chess.BLACK))
+            self.assertEqual(harness.said.count("You played b8c6."), 0)  # spoken as words
+            self.assertEqual(len([line for line in harness.said if "You played" in line]), 1)
+
+    async def test_a_yes_said_over_the_coach_still_confirms(self):
+        # Children answer before the sentence finishes. The yes lands while the coach
+        # line is still being generated, and must not be thrown away.
+        harness = harness_with(play_workflow(QUEEN_HANGS), coach=slow_coach_line)
+        async with harness:
+            await harness.send(MoveSpoken("d8h4"))
+            await harness.send(ConfirmMove())
+            await harness.until(lambda: harness.spoke("You played"))
+            self.assertTrue(harness.spoke("You played"))
+            self.assertEqual(
+                chess.Board(harness.last_fen).piece_at(chess.H4),
+                chess.Piece(chess.QUEEN, chess.BLACK),
+            )
+
+    async def test_a_scanned_position_cancels_the_move_being_checked(self):
+        # The board is re-set from outside while the guard is analysing. The old move
+        # must not be pushed onto the new position.
+        harness = harness_with(play_workflow(QUEEN_HANGS), analysis=slow_analyse)
+        fresh = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR b KQkq - 0 1"
+        async with harness:
+            await harness.send(MoveSpoken("d8h4"))
+            await harness.send(PositionObserved(fresh, source="browser"))
+            # Wait past the analysis it was in the middle of, then check nothing moved.
+            await harness.rest(0.5)
+            self.assertFalse(harness.spoke("You played"))
+            self.assertEqual(chess.Board(harness.last_fen).piece_map(), chess.Board().piece_map())
+
+    async def test_why_during_an_objection_is_about_the_unplayed_move(self):
+        # The child has not played anything yet, so "why?" cannot mean the last
+        # move — it means the move the coach just objected to.
+        async with Harness(play_workflow(QUEEN_HANGS)) as harness:
+            await harness.send(MoveSpoken("d8h4"))
+            await harness.send(QuestionAsked("why"))
+            self.assertTrue(harness.spoke("coach_whatif"))
+            self.assertFalse(harness.spoke("You have not played a move yet."))
+            self.assertFalse(harness.spoke("You played"))
+            await harness.send(ConfirmMove())
+            self.assertTrue(harness.spoke("You played"))
+            self.assertEqual(
+                chess.Board(harness.last_fen).piece_at(chess.H4),
+                chess.Piece(chess.QUEEN, chess.BLACK),
+            )
+
+    async def test_a_what_if_during_an_objection_is_what_yes_then_means(self):
+        # Warned about d8h4, the child wonders about b8c6 instead and says yes.
+        # "Yes" has to mean the move they were last talking about.
+        async with Harness(play_workflow(QUEEN_HANGS)) as harness:
+            await harness.send(MoveSpoken("d8h4"))
+            await harness.send(QuestionAsked("whatif", action_text="b8c6"))
+            await harness.send(ConfirmMove())
+            board = chess.Board(harness.last_fen)
+            self.assertEqual(board.piece_at(chess.C6), chess.Piece(chess.KNIGHT, chess.BLACK))
+            self.assertEqual(board.piece_at(chess.D8), chess.Piece(chess.QUEEN, chess.BLACK))
+
+    async def test_a_preview_of_someone_elses_move_is_not_playable(self):
+        # "What if black plays e5?" is about the other side. It is a legal move for
+        # black, so the question is answered — but a yes must not push black's move
+        # onto white's turn.
+        async with Harness(play_workflow()) as harness:
+            await harness.send(QuestionAsked("whatif", action_text="e7e5", side="black"))
+            self.assertTrue(harness.spoke("coach_whatif"))
+            self.assertEqual(harness.workflow.state.pending_uci, "")
+            await harness.send(ConfirmMove())
+            self.assertFalse(harness.spoke("You played"))
+            self.assertTrue(harness.spoke("Say the move"))
+            self.assertEqual(harness.last_fen, chess.Board().fen())
 
 
 class PlayModeTest(unittest.IsolatedAsyncioTestCase):
