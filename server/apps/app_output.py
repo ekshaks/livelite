@@ -2,7 +2,7 @@
 
 Apps emit one ``AppOutput`` per controller step. The session pipeline fans it out
 to three places: ``messages`` go to the transcript and TTS, ``feedback`` goes to
-the browser, and ``effect`` is picked up by an :mod:`server.core.effects` runner.
+the browser, and ``effect`` is picked up by an :mod:`server.apps.effects` runner.
 
 ``spell`` still carries its own ``GameOutput`` copy; new apps should import from
 here.
@@ -11,7 +11,7 @@ here.
 from dataclasses import dataclass, field
 from typing import Any
 
-from .events import AppFeedback
+from server.core.events import AppFeedback
 
 
 @dataclass

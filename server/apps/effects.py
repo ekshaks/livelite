@@ -22,7 +22,7 @@ import asyncio
 from collections.abc import Awaitable, Callable
 from typing import Any
 
-from .logging_utils import monitor_log
+from server.core.logging_utils import monitor_log
 
 EffectHandler = Callable[[Any], Awaitable[Any]]
 ErrorHandler = Callable[[Any, Exception], Any]
