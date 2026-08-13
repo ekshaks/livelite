@@ -145,12 +145,30 @@ def tts_kokoro_stream(text):
 
 
 class KokoroFastApiTTSProvider:
-    def __init__(self, mode: str = "local", audio_track: Optional[Any] = None):
+    def __init__(
+        self,
+        mode: str = "local",
+        audio_track: Optional[Any] = None,
+        pcm_sink: Optional[Any] = None,
+    ):
         self.mode = mode
         self.audio_track = audio_track
+        self.pcm_sink = pcm_sink
         self.client = AsyncOpenAI(base_url=_kokoro_fastapi_base_url(), api_key="not-needed")
 
     async def speak(self, text: str, interrupt_event: asyncio.Event) -> None:
+        if self.pcm_sink is not None:
+            await _tts_kokoro_stream_chunks(
+                text,
+                interrupt_event,
+                self.pcm_sink.write_pcm,
+                self.client,
+            )
+            finish = getattr(self.pcm_sink, "finish", None)
+            if finish is not None:
+                await finish()
+            await self.pcm_sink.wait_until_played()
+            return
         if self.mode == "local":
             await tts_kokoro_stream_async(text, interrupt_event, self.client)
             return
@@ -162,5 +180,7 @@ class KokoroFastApiTTSProvider:
         raise ValueError(f"Unknown Kokoro TTS mode: {self.mode}")
 
     def clear_output(self) -> None:
+        if self.pcm_sink is not None:
+            self.pcm_sink.clear()
         if self.mode == "webrtc" and self.audio_track is not None and hasattr(self.audio_track, "clear"):
             self.audio_track.clear()
