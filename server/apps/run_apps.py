@@ -3,6 +3,7 @@ import os
 from pathlib import Path
 
 from server.core.app_config import app_section
+from server.core.auth import AppAuthentication
 from server.core.server_config import web_config
 from server.core.user_profiles import load_user_directory
 from server.server_asyncio import Server
@@ -132,6 +133,10 @@ def main():
         app_registry=registry,
         user_directory=user_directory,
         config=web_config(use_https=use_https, **server_config),
+        authentication=AppAuthentication.from_environment(
+            login_html_path=Path(__file__).resolve().parents[2] / "client" / "login.html",
+            secure_cookie=use_https,
+        ),
     )
     server.run(host=host, port=port)
 

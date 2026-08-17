@@ -61,6 +61,24 @@ button { font: inherit; }
   min-height: 40px;
 }
 
+.logout-form button {
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface-raised);
+  color: var(--muted);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.logout-form button:hover,
+.logout-form button:focus-visible {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
 .global-user-selector {
   display: inline-flex;
   align-items: center;

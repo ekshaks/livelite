@@ -7,10 +7,12 @@ from aiortc import MediaStreamError
 
 from .core.utils import rx_Subject as Subject # for input audio/video subjects
 from .apps.routes import AppRoutes
+from .core.auth import AppAuthentication
 from .setup_tracks import pc_session_setup
 
 DEFAULT_CLIENT_HTML_PATH = Path(__file__).parent.parent / "client/client.html"
 DEFAULT_DASHBOARD_HTML_PATH = Path(__file__).parent.parent / "client/dashboard.html"
+DEFAULT_LOGIN_HTML_PATH = Path(__file__).parent.parent / "client/login.html"
 
 class Server:
     def __init__(
@@ -22,6 +24,7 @@ class Server:
         app_registry=None,
         user_directory=None,
         dashboard_html_path: Path = DEFAULT_DASHBOARD_HTML_PATH,
+        authentication: AppAuthentication | None = None,
     ):
         """Initialize the WebRTC server with a session runner.
         
@@ -34,8 +37,10 @@ class Server:
         self.run_session = run_session
         self.app_registry = app_registry
         self.user_directory = user_directory
+        self.authentication = authentication
         self.pcs: Set[RTCPeerConnection] = set()
-        self.app = web.Application()
+        middlewares = [authentication.middleware] if authentication is not None else []
+        self.app = web.Application(middlewares=middlewares)
         self.config = config
         self.app_assets_dir = self._resolve_app_assets_dir(app_assets_dir)
         self.dashboard_html_path = Path(dashboard_html_path)
@@ -55,6 +60,8 @@ class Server:
     def _setup_routes(self, client_html_path):
         """Set up the web application routes."""
         print('setting up routes..')
+        if self.authentication is not None:
+            self.authentication.register_routes(self.app)
         if self.app_registry is None:
             self.app.router.add_post("/offer", self.offer_handler)
 

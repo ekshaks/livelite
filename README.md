@@ -64,6 +64,22 @@ Use deterministic controller logic for scoring and state transitions. Use LLM/VL
 - **Kokoro** (default) — local ONNX model via OpenAI-compatible API (`localhost:8880`). Start with `Kokoro-FastAPI/`.
 - **Gemini TTS** — cloud, via `google-genai`.
 
+## Shared-password access for the app host
+
+`python -m server.apps.run_apps` requires a shared password and cookie-signing
+secret. Generate them once on the host (the password is prompted for and is
+not written to the repository):
+
+```bash
+python -m server.core.auth
+```
+
+Export the two printed values in the shell or deployment environment, then run
+the app host. Sessions expire after seven days by default; set
+`MULIVE_AUTH_SESSION_DAYS` to change that. The password verifier and signed
+session layer are separate so a future OAuth provider can reuse the existing
+protected routes and session cookies.
+
 
 ## Misc Install
 - Kokoro: change pytorch cpu version in pyproject.toml to the one the matches pre-installed (ALbertModel error)

@@ -42,6 +42,24 @@ body {
   min-height: 2.5rem;
 }
 
+.logout-form button {
+  min-height: 2.5rem;
+  padding: .45rem .75rem;
+  border: 1px solid #475569;
+  border-radius: .75rem;
+  background: #172033;
+  color: #cbd5e1;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.logout-form button:hover,
+.logout-form button:focus-visible {
+  border-color: #93c5fd;
+  color: #f8fafc;
+}
+
 .global-user-selector {
   display: inline-flex;
   align-items: center;
