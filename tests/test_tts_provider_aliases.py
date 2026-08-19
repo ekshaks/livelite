@@ -34,12 +34,12 @@ class TestTtsProviderAliasResolution(unittest.TestCase):
         self.assertEqual(_resolve_tts_provider_name("bogus"), "bogus")
 
     def test_make_tts_provider_accepts_legacy_alias(self):
-        provider = _make_tts_provider("kokoro", "local", audio_track=None)
+        provider = _make_tts_provider("kokoro", "local", audio_output=None)
         self.assertIsInstance(provider, KokoroFastApiTTSProvider)
 
     def test_make_tts_provider_rejects_unknown_provider(self):
         with self.assertRaises(ValueError) as ctx:
-            _make_tts_provider("bogus", "local", audio_track=None)
+            _make_tts_provider("bogus", "local", audio_output=None)
         self.assertIn("Unknown TTS provider", str(ctx.exception))
 
 

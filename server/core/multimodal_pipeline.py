@@ -31,7 +31,6 @@ async def run_multimodal_session(
 ):
     await session.wait_until_ready()
 
-    pc = session.pc
     audio_input = session.audio_input
     video_input = session.video_input
     subs = SubGroup()
@@ -71,7 +70,7 @@ async def run_multimodal_session(
     add_text_sinks(assistant_written, session, role="assistant", subs=subs)
     add_tts(
         assistant_spoken,
-        pc,
+        session.audio_output,
         turn.signals,
         subs=subs,
         mode=tts_mode,
