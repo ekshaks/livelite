@@ -16,6 +16,7 @@ from typing import Any, Optional
 
 import numpy as np
 
+from ..audio_output import AudioChunk
 from ..logging_utils import monitor_log, monitor_time
 
 
@@ -122,7 +123,7 @@ async def _stream_kokoro_to_track(text, interrupt_event, audio_track, voice, spe
             monitor_log("tts provider=kokoro_onnx event=interrupted")
             break
         block = pcm[start : start + frame_samples]
-        await audio_track.write_pcm(block, sample_rate=sr)
+        await audio_track.write(AudioChunk(block, sr))
         if first_write_at is None:
             first_write_at = time.perf_counter()
             monitor_log("tts provider=kokoro_onnx event=first_pcm_to_webrtc_track")

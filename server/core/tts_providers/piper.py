@@ -36,6 +36,7 @@ from typing import Any, Optional
 
 import numpy as np
 
+from ..audio_output import AudioChunk
 from ..logging_utils import monitor_log, monitor_time
 
 
@@ -253,7 +254,7 @@ async def _stream_piper_to_track(text, interrupt_event, audio_track):
         if first_track_write:
             first_track_write = False
             monitor_log("tts provider=piper event=first_pcm_to_webrtc_track")
-        await audio_track.write_pcm(block, sample_rate=sample_rate)
+        await audio_track.write(AudioChunk(block, sample_rate))
 
     await _stream_piper_pcm(text, interrupt_event, write_track)
 

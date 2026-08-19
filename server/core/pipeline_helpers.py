@@ -1,5 +1,6 @@
 import re
 
+from .audio_output import AudioOutput
 from .logging_utils import log_text_block, monitor_log
 from .events import ClientTranscriptMessage
 from .stream_dsl import client_message_sink, expand_items, map_items
@@ -34,9 +35,22 @@ def _text_log_sink(title, max_chars=1600):
     return attach
 
 
-def add_text_sinks(stream, session, role, subs, log_title=None, max_log_chars=1600):
+def add_text_sinks(
+    stream,
+    session,
+    role,
+    subs,
+    log_title=None,
+    max_log_chars=1600,
+    log=True,
+):
+    """Send transcript text to the client, with optional server-side logging.
+
+    Set ``log=False`` for authentication or other sensitive user input. Client
+    delivery is unaffected.
+    """
     title = log_title or ("ASSISTANT WRITTEN RESPONSE" if role == "assistant" else "USER MESSAGE")
-    if role != "assistant":
+    if role != "assistant" and log:
         stream.to(_text_log_sink(title, max_chars=max_log_chars), name=f"log_{role}_text", subs=subs)
     client_messages = stream | map_items(
         lambda text: ClientTranscriptMessage(role=role, content=str(text)),
@@ -69,7 +83,7 @@ def _resolve_tts_provider_name(provider_name):
     return _TTS_PROVIDER_ALIASES.get(provider_name, provider_name)
 
 
-def _make_tts_provider(provider_name, output_mode, audio_track):
+def _make_tts_provider(provider_name, output_mode, audio_output):
     """Instantiate a TTS provider for the requested output mode.
 
     Supported providers:
@@ -86,21 +100,21 @@ def _make_tts_provider(provider_name, output_mode, audio_track):
     if provider_name == "kokoro_fastapi":
         if output_mode == "local":
             return KokoroFastApiTTSProvider(mode="local")
-        return KokoroFastApiTTSProvider(mode="webrtc", audio_track=audio_track)
+        return KokoroFastApiTTSProvider(mode="webrtc", audio_track=audio_output)
     if provider_name == "kokoro_onnx":
         if output_mode == "local":
             return KokoroOnnxTTSProvider(output="local")
-        return KokoroOnnxTTSProvider(output="webrtc", audio_track=audio_track)
+        return KokoroOnnxTTSProvider(output="webrtc", audio_track=audio_output)
     if provider_name == "piper":
         if output_mode == "local":
             return PiperTTSProvider(output="local")
-        return PiperTTSProvider(output="webrtc", audio_track=audio_track)
+        return PiperTTSProvider(output="webrtc", audio_track=audio_output)
     raise ValueError(f"Unknown TTS provider: {provider_name}")
 
 
 def add_kokoro_tts(
     stream,
-    pc,
+    audio_output,
     turn_signals,
     subs,
     mode,
@@ -113,9 +127,9 @@ def add_kokoro_tts(
     so existing muapp entrypoints (spell, chess) don't need to be updated
     beyond passing the new ``provider`` argument.
     """
-    add_tts(
+    return add_tts(
         stream,
-        pc,
+        audio_output,
         turn_signals,
         subs=subs,
         mode=mode,
@@ -126,7 +140,7 @@ def add_kokoro_tts(
 
 def add_tts(
     stream,
-    pc,
+    audio_output,
     turn_signals,
     subs,
     mode,
@@ -136,7 +150,7 @@ def add_tts(
     """Attach a TTS sink to ``stream``.
 
     ``mode`` picks the output surface (``local`` = server speaker via
-    sounddevice, ``browser`` = outbound WebRTC audio track). ``provider``
+    sounddevice, ``browser`` = the session's audio output). ``provider``
     picks the synthesis backend (``kokoro_fastapi``, ``kokoro_onnx``, or
     ``piper``).
     """
@@ -144,18 +158,20 @@ def add_tts(
         return
 
     if mode == "local":
-        audio_track = None
+        output = None
         output_mode = "local"
     elif mode == "browser":
-        audio_track = getattr(pc, "assistant_audio_track", None)
-        if audio_track is None:
-            raise RuntimeError("Browser TTS requested, but pc.assistant_audio_track is not available")
+        output = audio_output
+        if output is None:
+            raise RuntimeError("Browser TTS requested, but no audio output is available")
+        if not isinstance(output, AudioOutput):
+            raise TypeError("Browser TTS requires an AudioOutput implementation")
         output_mode = "webrtc"
     else:
         raise ValueError(f"Unknown TTS mode: {mode}")
 
     canonical_provider = _resolve_tts_provider_name(provider)
-    tts_provider = _make_tts_provider(canonical_provider, output_mode, audio_track)
+    tts_provider = _make_tts_provider(canonical_provider, output_mode, output)
     monitor_log(
         f"tts sink attached provider_input={provider} "
         f"provider_effective={canonical_provider} mode={mode} name_prefix={name_prefix}"
@@ -174,3 +190,4 @@ def add_tts(
         name=name,
         subs=subs,
     )
+    return tts_provider

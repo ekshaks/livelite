@@ -30,7 +30,7 @@ async def run_session(session, tts_mode=None, stt_provider="mlx", stt_model=None
     user_text = transcripts | final_transcript_text()
 
     add_text_sinks(user_text, session, role="user", subs=subs)
-    add_tts(user_text, session.pc, turn.signals, subs=subs, mode=tts_mode)
+    add_tts(user_text, session.audio_output, turn.signals, subs=subs, mode=tts_mode)
 
     try:
         await session.closed.wait()

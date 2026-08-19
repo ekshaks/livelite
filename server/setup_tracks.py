@@ -128,6 +128,7 @@ def pc_session_setup(run_session, config, on_peer_close=None):
     audio_input, video_input, client_input = Subject(), Subject(), Subject()
     session = SessionContext(
         pc=pc,
+        audio_output=assistant_audio_track,
         data_channels=data_channels,
         audio_input=audio_input,
         video_input=video_input,

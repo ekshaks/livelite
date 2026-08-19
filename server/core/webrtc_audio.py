@@ -9,6 +9,8 @@ import numpy as np
 from aiortc.mediastreams import AudioStreamTrack, MediaStreamError
 from pydub import AudioSegment
 
+from .audio_output import AudioChunk
+
 
 class AssistantAudioTrack(AudioStreamTrack):
     """Outbound WebRTC audio track for assistant speech.
@@ -29,15 +31,23 @@ class AssistantAudioTrack(AudioStreamTrack):
         self._timestamp = 0
         self._logged_first_pcm = False
 
-    async def write_pcm(self, samples, sample_rate: int):
-        """Queue mono int16 PCM for playback on the browser audio track."""
-        pcm = np.asarray(samples, dtype=np.int16).reshape(-1)
-        if sample_rate != self.sample_rate:
-            pcm = self._resample_mono_int16(pcm, sample_rate, self.sample_rate)
+    async def write(self, chunk: AudioChunk) -> None:
+        """Queue mono PCM16 audio for playback on the browser track."""
+        if chunk.channels != 1:
+            raise ValueError("WebRTC assistant audio currently requires mono chunks")
+        pcm = chunk.samples
+        if chunk.sample_rate != self.sample_rate:
+            pcm = self._resample_mono_int16(pcm, chunk.sample_rate, self.sample_rate)
         if not self._logged_first_pcm:
             self._logged_first_pcm = True
             print(f"AssistantAudioTrack queued PCM: {len(pcm)} samples @ {self.sample_rate}Hz")
         await self._queue.put(pcm)
+
+    async def write_pcm(self, samples, sample_rate: int) -> None:
+        """Compatibility adapter for callers using the previous PCM method."""
+        await self.write(
+            AudioChunk(np.asarray(samples, dtype=np.int16).reshape(-1), sample_rate)
+        )
 
     def clear(self):
         """Drop queued assistant audio that has not yet been emitted."""

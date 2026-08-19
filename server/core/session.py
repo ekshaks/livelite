@@ -3,14 +3,15 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict
 
-from aiortc import RTCPeerConnection
+from .audio_output import AudioOutput
 
 
 @dataclass
 class SessionContext:
-    """Runtime resources and lifecycle signals for one WebRTC session."""
+    """Runtime resources and lifecycle signals for one live session."""
 
-    pc: RTCPeerConnection
+    pc: Any
+    audio_output: AudioOutput
     data_channels: Dict[str, Any]
     audio_input: Any
     video_input: Any
@@ -48,4 +49,5 @@ class SessionContext:
 
     @property
     def assistant_audio_track(self):
-        return getattr(self.pc, "assistant_audio_track", None)
+        """Compatibility alias for callers not yet using ``audio_output``."""
+        return self.audio_output

@@ -6,6 +6,7 @@ from typing import Any, Optional
 import numpy as np
 from openai import AsyncOpenAI
 
+from ..audio_output import AudioChunk
 from ..logging_utils import monitor_log, monitor_time
 
 KOKORO_PCM_SAMPLE_RATE = 24000
@@ -114,7 +115,7 @@ async def tts_kokoro_to_track_async(text, interrupt_event, audio_track, client=N
         if first_track_write:
             first_track_write = False
             monitor_log("tts provider=kokoro event=first_pcm_to_webrtc_track")
-        await audio_track.write_pcm(audio_block, sample_rate=samplerate)
+        await audio_track.write(AudioChunk(audio_block, samplerate))
 
     await _tts_kokoro_stream_chunks(text, interrupt_event, write_track, client)
 
@@ -184,3 +185,7 @@ class KokoroFastApiTTSProvider:
             self.pcm_sink.clear()
         if self.mode == "webrtc" and self.audio_track is not None and hasattr(self.audio_track, "clear"):
             self.audio_track.clear()
+
+    async def aclose(self) -> None:
+        """Release the provider's per-session HTTP connection pool."""
+        await self.client.close()
