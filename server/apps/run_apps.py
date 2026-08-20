@@ -14,6 +14,13 @@ from .loader import load_app_catalog
 DEFAULT_CATALOG = Path(__file__).resolve().parents[2] / "muapps" / "apps.yml"
 
 
+def resolve_catalog_path(catalog_path: Path, value: object, default: str) -> Path:
+    """Resolve a catalog path while supporting ``~`` and environment variables."""
+    configured = os.path.expandvars(str(value or default))
+    path = Path(configured).expanduser()
+    return path if path.is_absolute() else catalog_path.parent / path
+
+
 def _collect_warm_up_targets(registry):
     """Scan enabled apps' merged configs for STT / TTS pairs to preload.
 
@@ -103,7 +110,7 @@ def main():
     args = parse_args()
     registry, catalog = load_app_catalog(Path(args.catalog))
     catalog_path = Path(args.catalog).resolve()
-    users_path = catalog_path.parent / str(catalog.get("users") or "users.yml")
+    users_path = resolve_catalog_path(catalog_path, catalog.get("users"), "users.yml")
     user_directory = load_user_directory(users_path)
     for unavailable in registry.unavailable_apps():
         print(

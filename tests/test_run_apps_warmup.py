@@ -13,7 +13,11 @@ from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 from server.apps.loader import load_app_catalog
-from server.apps.run_apps import _collect_warm_up_targets, _warm_up_from_registry
+from server.apps.run_apps import (
+    _collect_warm_up_targets,
+    _warm_up_from_registry,
+    resolve_catalog_path,
+)
 
 
 def _write(path: Path, content: str) -> None:
@@ -78,6 +82,26 @@ def _make_catalog(root: Path, aws_extra: str = "") -> Path:
 
 
 class WarmUpScanTests(unittest.TestCase):
+    def test_resolve_catalog_path_supports_relative_home_env_and_absolute(self):
+        catalog = Path("/tmp/catalog/apps.yml")
+        with patch.dict(os.environ, {"MULIVE_USERS": "profiles/users.yml"}):
+            self.assertEqual(
+                resolve_catalog_path(catalog, "users.yml", "fallback.yml"),
+                Path("/tmp/catalog/users.yml"),
+            )
+            self.assertEqual(
+                resolve_catalog_path(catalog, "$MULIVE_USERS", "fallback.yml"),
+                Path("/tmp/catalog/profiles/users.yml"),
+            )
+        self.assertEqual(
+            resolve_catalog_path(catalog, "~/users.yml", "fallback.yml"),
+            Path.home() / "users.yml",
+        )
+        self.assertEqual(
+            resolve_catalog_path(catalog, "/var/lib/mulive/users.yml", "fallback.yml"),
+            Path("/var/lib/mulive/users.yml"),
+        )
+
     def _load(self, tmp: Path):
         return load_app_catalog(_make_catalog(tmp))
 
