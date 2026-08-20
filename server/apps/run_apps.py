@@ -6,6 +6,7 @@ from server.core.app_config import app_section
 from server.core.auth import AppAuthentication
 from server.core.server_config import web_config
 from server.core.user_profiles import load_user_directory
+from server.core.runtime_paths import users_path
 from server.server_asyncio import Server
 
 from .loader import load_app_catalog
@@ -103,8 +104,7 @@ def main():
     args = parse_args()
     registry, catalog = load_app_catalog(Path(args.catalog))
     catalog_path = Path(args.catalog).resolve()
-    users_path = catalog_path.parent / str(catalog.get("users") or "users.yml")
-    user_directory = load_user_directory(users_path)
+    user_directory = load_user_directory(users_path(catalog_path, catalog))
     for unavailable in registry.unavailable_apps():
         print(
             "App unavailable: "

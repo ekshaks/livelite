@@ -6,6 +6,7 @@ from reactivex.scheduler.eventloop import AsyncIOScheduler
 from reactivex.subject import Subject as rx_Subject  # re-exported for the servers
 
 from .logging_utils import monitor_time
+from .runtime_paths import user_database_path
 
 def timeit(name: str = "", service: str = "runtime"):
     def decorator(func):
@@ -62,7 +63,9 @@ class Memory:
         from agno.models.message import Message
 
         self.Message = Message
-        memory_db = SqliteMemoryDb(table_name="user_memories", db_file="tmp/agent.db")
+        database_path = user_database_path()
+        database_path.parent.mkdir(parents=True, exist_ok=True)
+        memory_db = SqliteMemoryDb(table_name="user_memories", db_file=str(database_path))
         self.memory = AgnoMemory(
             db=memory_db
         )
