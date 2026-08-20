@@ -6,7 +6,6 @@ pydub
 pyaudio
 asyncio
 reactivex
-agno
 openai
 groq
 torch
