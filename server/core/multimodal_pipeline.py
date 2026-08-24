@@ -1,4 +1,10 @@
-from .llm_utils import call_llm, create_agent, split_spoken_written
+import asyncio
+import time
+
+import numpy as np
+
+from .audio_output import AudioChunk
+from .llm_utils import call_groq_chat, call_llm, create_agent, split_spoken_written
 from .pipeline_helpers import add_tts, add_text_sinks
 from .stream_dsl import (
     Stream,
@@ -10,6 +16,65 @@ from .stream_dsl import (
     turn_detector,
     stt,
 )
+from .tts_providers.kokoro_fastapi import _tts_kokoro_stream_chunks
+
+
+async def run_voice_turn(
+    pcm16: bytes,
+    *,
+    transcribe,
+    stt_timeout_seconds: float,
+    llm_model: str,
+    cancelled: asyncio.Event,
+    is_current,
+    emit,
+    audio_output,
+    turn_id: str,
+    companion_for_text,
+    response_id_factory,
+    tts_client=None,
+    get_transcript=None,
+    answer=None,
+    speak=None,
+) -> None:
+    """Run the shared local voice turn, rejecting output from stale generations."""
+    started = time.perf_counter()
+    try:
+        text = await (get_transcript() if get_transcript is not None else asyncio.wait_for(transcribe(np.frombuffer(pcm16, dtype=np.int16)), timeout=stt_timeout_seconds))
+    except TimeoutError:
+        if is_current():
+            await emit({"type": "error", "turn_id": turn_id, "text": "Speech recognition timed out. Try again."})
+        return
+    if cancelled.is_set() or not is_current():
+        return
+    companion = companion_for_text(text)
+    await emit({"type": "transcript.final", "turn_id": turn_id, "text": text, "companion": companion})
+    reply = await (answer(text) if answer is not None else call_groq_chat(
+        llm_model,
+        system_prompt=f"You are {companion.title()}, a concise Mulive voice companion. Answer the user directly. Distinguish hypotheses from verified facts.",
+        user_prompt=text,
+    ))
+    if cancelled.is_set() or not is_current():
+        return
+    response_id = response_id_factory()
+    await emit({"type": "response.started", "turn_id": turn_id, "response_id": response_id, "sample_rate": 24_000})
+    await emit({"type": "response.text", "turn_id": turn_id, "response_id": response_id, "text": reply})
+
+    async def write_audio(block, sample_rate) -> None:
+        if cancelled.is_set() or not is_current():
+            return
+        await audio_output.write(AudioChunk(block.astype(np.int16, copy=False), sample_rate))
+
+    if speak is not None:
+        await speak(reply, cancelled, audio_output)
+    else:
+        await _tts_kokoro_stream_chunks(reply, cancelled, write_audio, client=tts_client)
+    if not cancelled.is_set() and is_current():
+        wait_until_drained = getattr(audio_output, "wait_until_drained", None)
+        if wait_until_drained is not None:
+            await wait_until_drained()
+        if is_current():
+            await emit({"type": "response.finished", "turn_id": turn_id, "response_id": response_id})
 
 
 async def run_multimodal_session(

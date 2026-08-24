@@ -3,6 +3,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Dict
 
+from .audio_input import AudioInput
 from .audio_output import AudioOutput
 
 
@@ -13,7 +14,7 @@ class SessionContext:
     pc: Any
     audio_output: AudioOutput
     data_channels: Dict[str, Any]
-    audio_input: Any
+    audio_input: AudioInput
     video_input: Any
     client_input: Any
     main_loop: asyncio.AbstractEventLoop

@@ -7,12 +7,12 @@ from typing import Optional
 import av
 import numpy as np
 from aiortc.mediastreams import AudioStreamTrack, MediaStreamError
-from pydub import AudioSegment
-
 from .audio_output import AudioChunk
+from .audio_utils import resample_pcm16_mono
 
 
 class AssistantAudioTrack(AudioStreamTrack):
+    # ISC: R1 R2 T1 T2 I_SAFE I_AUTH I_LIVE I_FRESH I_ATOMIC
     """Outbound WebRTC audio track for assistant speech.
 
     The track emits silence until audio is queued. Later `client_audio_sink()`
@@ -37,7 +37,7 @@ class AssistantAudioTrack(AudioStreamTrack):
             raise ValueError("WebRTC assistant audio currently requires mono chunks")
         pcm = chunk.samples
         if chunk.sample_rate != self.sample_rate:
-            pcm = self._resample_mono_int16(pcm, chunk.sample_rate, self.sample_rate)
+            pcm = resample_pcm16_mono(pcm, chunk.sample_rate, self.sample_rate)
         if not self._logged_first_pcm:
             self._logged_first_pcm = True
             print(f"AssistantAudioTrack queued PCM: {len(pcm)} samples @ {self.sample_rate}Hz")
@@ -103,14 +103,3 @@ class AssistantAudioTrack(AudioStreamTrack):
             out[: len(self._buffer)] = self._buffer
             self._buffer = np.array([], dtype=np.int16)
         return out
-
-    @staticmethod
-    def _resample_mono_int16(samples: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
-        segment = AudioSegment(
-            data=samples.tobytes(),
-            sample_width=2,
-            frame_rate=src_rate,
-            channels=1,
-        )
-        segment = segment.set_frame_rate(dst_rate)
-        return np.frombuffer(segment.raw_data, dtype=np.int16)

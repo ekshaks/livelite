@@ -11,6 +11,8 @@ import json
 import os
 
 from .core.audio_utils import convert_and_resample_frame
+from .core.audio_input import SubjectAudioInput
+from .core.audio_output import AudioChunk
 from .core.webrtc_audio import AssistantAudioTrack
 from .core.session import SessionContext
 from .core.utils import rx_Subject as Subject # for input audio/video subjects
@@ -43,6 +45,7 @@ def _load_ice_servers(config):
     return [RTCIceServer(urls=[u.strip() for u in urls.split(",") if u.strip()])]
 
 async def setup_audio_track(pc, track: MediaStreamTrack, speech_turn_input, stop_event, config):
+    # ISC: R1 R2 T1 T2 I_SAFE I_AUTH I_LIVE I_FRESH I_ATOMIC
     """Handle incoming audio track and process it through the pipeline.
 
     Every buffered chunk is forwarded straight to the speech-turn subject.
@@ -65,7 +68,7 @@ async def setup_audio_track(pc, track: MediaStreamTrack, speech_turn_input, stop
 
             # Process complete chunks
             while len(buffer) >= bsize:
-                speech_turn_input.on_next(buffer[:bsize])
+                speech_turn_input.write(AudioChunk(buffer[:bsize], sample_rate=sr))
                 buffer = buffer[bsize:]
                 
         except MediaStreamError:
@@ -82,7 +85,8 @@ async def setup_audio_track(pc, track: MediaStreamTrack, speech_turn_input, stop
     
     # Process any remaining audio
     if len(buffer) > 0 and not stop_event.is_set():
-        speech_turn_input.on_next(buffer)
+        speech_turn_input.write(AudioChunk(buffer, sample_rate=sr))
+    speech_turn_input.close()
     
     print("Audio processing stopped")
 
@@ -125,7 +129,7 @@ def pc_session_setup(run_session, config, on_peer_close=None):
     pc.assistant_audio_track = assistant_audio_track
     pc.addTrack(assistant_audio_track)
     main_loop = asyncio.get_running_loop()
-    audio_input, video_input, client_input = Subject(), Subject(), Subject()
+    audio_input, video_input, client_input = SubjectAudioInput(Subject()), Subject(), Subject()
     session = SessionContext(
         pc=pc,
         audio_output=assistant_audio_track,

@@ -21,6 +21,7 @@ muapps/
 *.so
 
 # Distribution / packaging
+client/macos/.build/
 .Python
 build/
 develop-eggs/

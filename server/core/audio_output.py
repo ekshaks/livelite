@@ -40,6 +40,7 @@ class AudioChunk:
 
 @runtime_checkable
 class AudioOutput(Protocol):
+    # ISC: R1 R2 T1 T2 I_SAFE I_AUTH I_LIVE I_FRESH I_ATOMIC
     """Accept typed audio chunks produced by a TTS provider.
 
     Implementations own any resampling, buffering, pacing, and transport

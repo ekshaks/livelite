@@ -71,6 +71,10 @@ class PinnedWhisper:
         loop = asyncio.get_running_loop()
         return await loop.run_in_executor(self.executor, self._infer, segment)
 
+    async def wait_ready(self) -> None:
+        """Wait until the model has loaded, propagating load failures."""
+        await asyncio.wrap_future(self._stt_future)
+
     def shutdown(self) -> None:
         """Release the worker thread and drop any queued work."""
         self.executor.shutdown(wait=False, cancel_futures=True)
