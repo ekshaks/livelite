@@ -6,7 +6,6 @@ provider is a shared password; a future OAuth callback can issue the same
 """
 
 import argparse
-import base64
 import hashlib
 import hmac
 import json
@@ -19,6 +18,8 @@ from typing import Protocol
 from urllib.parse import quote
 
 from aiohttp import web
+
+from .token_signing import decode_json, encode_json, sign, signature_matches
 
 
 PASSWORD_HASH_ENV = "MULIVE_AUTH_PASSWORD_HASH"
@@ -74,23 +75,17 @@ class SignedSessionStore:
             "name": principal.display_name,
             "exp": int(time.time()) + self.duration_seconds,
         }
-        encoded = _b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8"))
-        signature = hmac.new(self._secret, encoded.encode("ascii"), hashlib.sha256).digest()
-        return f"{encoded}.{_b64encode(signature)}"
+        encoded = encode_json(payload)
+        return f"{encoded}.{sign(self._secret, encoded)}"
 
     def read(self, token: str | None) -> AuthenticatedPrincipal | None:
         if not token:
             return None
         try:
             encoded, supplied_signature = token.split(".", 1)
-            expected_signature = hmac.new(
-                self._secret,
-                encoded.encode("ascii"),
-                hashlib.sha256,
-            ).digest()
-            if not hmac.compare_digest(_b64decode(supplied_signature), expected_signature):
+            if not signature_matches(self._secret, encoded, supplied_signature):
                 return None
-            payload = json.loads(_b64decode(encoded))
+            payload = decode_json(encoded)
             if not isinstance(payload, dict) or int(payload["exp"]) < time.time():
                 return None
             subject = payload["sub"]

@@ -1,7 +1,6 @@
 import numpy as np
 import av
 from pydub import AudioSegment
-from io import BytesIO
 
 
 def load_wav_to_array(path: str, target_sr: int = 16000) -> np.ndarray:
@@ -17,58 +16,6 @@ def load_wav_to_array(path: str, target_sr: int = 16000) -> np.ndarray:
         data = librosa.resample(data, orig_sr=sr, target_sr=target_sr)
     return data.astype(np.float32)
 
-
-def show_frame_properties(frame: av.audio.frame.AudioFrame):
-    for attr in dir(frame):
-        if not attr.startswith("_"):
-            try:
-                value = getattr(frame, attr)
-                print(f"{attr}: {value}")
-            except Exception as e:
-                print(f"{attr}: <error: {e}>")
-
-def estimate_pitch(y, sr):
-    # Convert to float in [-1, 1]
-    y = y.astype(np.float32) / 32768.0
-    # librosa's YIN pitch detection
-
-
-
-def is_active_speaker(chunk, sr, rms_thresh=0.05, centroid_thresh=2000, pitch_threshold=165, debug=True, filter_gender=None):
-    """
-    Quick heuristic for near vs far:
-    - RMS loudness must be above rms_thresh
-    - Spectral centroid must be above centroid_thresh (Hz)
-    """
-    # Normalize to float32 [-1, 1]
-    y = chunk.astype(np.float32) / 32768.0
-
-    # Fast path: when no gender filter and no debug metrics are wanted, the
-    # decision depends only on RMS. Plain numpy is ~100x cheaper per call
-    # than the librosa feature stack and avoids a >1 s librosa warm-up on
-    # the first chunk — significant on a 1-vCPU server.
-    if filter_gender is None and not debug:
-        return float(np.sqrt(np.mean(np.square(y)))) > rms_thresh
-
-    import librosa
-
-    rms = np.mean(librosa.feature.rms(y=y))
-    centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr))
-    rolloff = np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr, roll_percent=0.85))
-    zcr = np.mean(librosa.feature.zero_crossing_rate(y))
-
-    pitches = librosa.yin(y, fmin=50, fmax=300, sr=sr)
-    f0 = np.nanmean(pitches)
-
-    gender = "male" if f0 < pitch_threshold else "female"
-
-    active = (rms > rms_thresh) and (gender == filter_gender if filter_gender else True)
-
-    # Decision
-
-    if active and debug:
-        print(f"RMS: {rms}, Centroid: {centroid}, Rolloff: {rolloff}, ZCR: {zcr}, Gender: {gender}, F0: {f0}")
-    return active
 
 def convert_and_resample_frame(frame: av.audio.frame.AudioFrame, target_sample_rate: int = 16000, target_channels: int = 1, debug: bool = False) -> np.ndarray:
     # ISC: R1 R2 T1 T2 I_SAFE I_AUTH I_LIVE I_FRESH I_ATOMIC
@@ -122,51 +69,3 @@ def resample_pcm16_mono(samples: np.ndarray, src_rate: int, dst_rate: int) -> np
         channels=1,
     ).set_frame_rate(dst_rate)
     return np.frombuffer(segment.raw_data, dtype=np.int16)
-
-def generate_fake_audio_frame(duration_ms: int = 20, sample_rate: int = 48000, channels: int = 2) -> av.audio.frame.AudioFrame:
-    """Generate a fake audio frame with sine wave data."""
-    # Calculate number of samples for given duration
-    num_samples = int(sample_rate * duration_ms / 1000)
-    
-    # Generate time array
-    t = np.linspace(0, duration_ms/1000, num_samples, False)
-    
-    # Generate stereo sine wave (440Hz for left, 880Hz for right)
-    left_channel = (np.sin(2 * np.pi * 440 * t) * 32767).astype(np.int16)
-    right_channel = (np.sin(2 * np.pi * 880 * t) * 32767).astype(np.int16)
-    
-    # Combine channels
-    samples = np.stack([left_channel, right_channel], axis=0) if channels == 2 else left_channel
-    
-    # Create PyAV AudioFrame
-    frame = av.audio.frame.AudioFrame(
-        format='s16',
-        layout='stereo' if channels == 2 else 'mono',
-        samples=num_samples
-    )
-    frame.rate = sample_rate
-    
-    # Copy samples to frame
-    frame.planes[0].update(samples.tobytes())
-    
-    return frame
-
-def test_convert_and_resample():
-    # Generate fake frame (20ms, 48kHz, stereo, int16)
-    input_frame = generate_fake_audio_frame(duration_ms=20, sample_rate=48000, channels=2)
-    
-    # Convert and resample
-    output_samples = convert_and_resample_frame(input_frame, target_sample_rate=16000, target_channels=1)
-    
-    # Verify output
-    print(f"Input frame: {input_frame.rate}Hz, {input_frame.layout.name}, samples: {input_frame.samples}")
-    print(f"Output array shape: {output_samples.shape}, dtype: {output_samples.dtype}")
-    
-    # Verify properties
-    expected_samples = int(20 * 16000 / 1000)  # 20ms at 16kHz = 320 samples
-    assert output_samples.shape == (1, expected_samples), f"Expected shape (1, {expected_samples}), got {output_samples.shape}"
-    assert output_samples.dtype == np.int16, "Output dtype should be int16"
-    print("All tests passed!")
-
-if __name__ == "__main__":
-    test_convert_and_resample()

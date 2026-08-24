@@ -25,6 +25,7 @@ class AssistantAudioTrack(AudioStreamTrack):
         super().__init__()
         self.sample_rate = sample_rate
         self.samples_per_frame = int(sample_rate * frame_duration_ms / 1000)
+        self._frame_duration_seconds = frame_duration_ms / 1000
         self._queue = asyncio.Queue()
         self._buffer = np.array([], dtype=np.int16)
         self._start: Optional[float] = None
@@ -61,6 +62,11 @@ class AssistantAudioTrack(AudioStreamTrack):
         buffered_samples = len(self._buffer)
         self._buffer = np.array([], dtype=np.int16)
         print(f"[interrupt] AssistantAudioTrack cleared chunks={dropped_chunks} buffered_samples={buffered_samples}")
+
+    async def wait_until_drained(self) -> None:
+        """Wait until queued PCM has been emitted by the paced WebRTC track."""
+        while not self._queue.empty() or len(self._buffer):
+            await asyncio.sleep(self._frame_duration_seconds)
 
     async def recv(self):
         if self.readyState != "live":

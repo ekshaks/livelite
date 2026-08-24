@@ -38,7 +38,6 @@ async def run_session(
         prompts_path=PROMPTS_FILE,
         prompt_id="visual_solver",
         agent_name="Math Helper",
-        llm_stage_name="multimodal_llm",
         tts_mode=tts_mode,
         tts_provider=tts_provider,
     )

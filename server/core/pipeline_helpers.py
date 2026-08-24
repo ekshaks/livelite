@@ -4,9 +4,8 @@ from .audio_output import AudioOutput
 from .logging_utils import log_text_block, monitor_log
 from .events import ClientTranscriptMessage
 from .stream_dsl import client_message_sink, expand_items, map_items
-from .tts_providers import KokoroFastApiTTSProvider, tts_sink
-from .tts_providers.kokoro_onnx import KokoroOnnxTTSProvider
-from .tts_providers.piper import PiperTTSProvider
+from .tts_providers import tts_sink
+from .tts_providers.factory import TTSConfig, create_tts_provider
 
 # Split after sentence/clause punctuation (plus any closing quotes/brackets)
 # followed by whitespace. Same boundary the spell app uses for its per-phrase
@@ -83,33 +82,17 @@ def _resolve_tts_provider_name(provider_name):
     return _TTS_PROVIDER_ALIASES.get(provider_name, provider_name)
 
 
-def _make_tts_provider(provider_name, output_mode, audio_output):
-    """Instantiate a TTS provider for the requested output mode.
+def make_tts_provider(provider_name, output_mode, audio_output):
+    """Adapt legacy helper arguments to the canonical TTS factory."""
+    return create_tts_provider(
+        TTSConfig(provider=_resolve_tts_provider_name(provider_name), output=output_mode),
+        audio_output=audio_output,
+    )
 
-    Supported providers:
 
-    * ``kokoro_fastapi`` — external Kokoro-FastAPI HTTP server. Streams PCM
-      chunks; good on desktop where a second PyTorch process is fine.
-      The legacy alias ``"kokoro"`` maps here.
-    * ``kokoro_onnx``   — in-process Kokoro (ONNX runtime). Whole-clip
-      synth; combine with :func:`split_spoken_phrases` to bound TTFB.
-    * ``piper``         — in-process Piper (rhasspy) TTS. Truly streaming
-      PCM output, small memory footprint, preferred on small CPU boxes.
-    """
-    provider_name = _resolve_tts_provider_name(provider_name)
-    if provider_name == "kokoro_fastapi":
-        if output_mode == "local":
-            return KokoroFastApiTTSProvider(mode="local")
-        return KokoroFastApiTTSProvider(mode="webrtc", audio_track=audio_output)
-    if provider_name == "kokoro_onnx":
-        if output_mode == "local":
-            return KokoroOnnxTTSProvider(output="local")
-        return KokoroOnnxTTSProvider(output="webrtc", audio_track=audio_output)
-    if provider_name == "piper":
-        if output_mode == "local":
-            return PiperTTSProvider(output="local")
-        return PiperTTSProvider(output="webrtc", audio_track=audio_output)
-    raise ValueError(f"Unknown TTS provider: {provider_name}")
+# Compatibility for existing app entrypoints and tests; new code uses the
+# public factory above.
+_make_tts_provider = make_tts_provider
 
 
 def add_kokoro_tts(
@@ -171,7 +154,7 @@ def add_tts(
         raise ValueError(f"Unknown TTS mode: {mode}")
 
     canonical_provider = _resolve_tts_provider_name(provider)
-    tts_provider = _make_tts_provider(canonical_provider, output_mode, output)
+    tts_provider = make_tts_provider(canonical_provider, output_mode, output)
     monitor_log(
         f"tts sink attached provider_input={provider} "
         f"provider_effective={canonical_provider} mode={mode} name_prefix={name_prefix}"

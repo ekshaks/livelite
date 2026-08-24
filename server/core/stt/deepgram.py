@@ -120,14 +120,16 @@ def deepgram_stt(
     )
 
     async def transcribe(segment):
+        context = getattr(segment, "context", None)
+        samples = getattr(segment, "samples", segment)
         try:
-            text = await asyncio.to_thread(client.transcribe, segment)
+            text = await asyncio.to_thread(client.transcribe, samples)
         except Exception as exc:
             if on_status:
                 on_status("error", {"model": model, "reason": str(exc)})
-            return TranscriptEvent(text="", is_final=True)
+            return TranscriptEvent(text="", is_final=True, context=context)
         if on_status:
             on_status("ready", {"model": model})
-        return TranscriptEvent(text=text, is_final=True)
+        return TranscriptEvent(text=text, is_final=True, context=context)
 
     return async_map_stage(transcribe, name=name)

@@ -11,6 +11,7 @@ from reactivex import operators as ops
 from reactivex.disposable import CompositeDisposable
 
 from .logging_utils import monitor_log
+from .turn_source import AudioTurn
 
 
 class Sub:
@@ -136,6 +137,14 @@ def turn_detector(name: str = "turn_detector", **kwargs):
                     ops.map(lambda event: event.signal),
                 ),
                 name=f"{name}.signals",
+            ),
+            events=Stream(events, name=f"{name}.events"),
+            turns=Stream(
+                events.pipe(
+                    ops.filter(lambda event: event.segment is not None),
+                    ops.map(lambda event: AudioTurn(event.context, event.segment)),
+                ),
+                name=f"{name}.turns",
             ),
         )
 
@@ -286,13 +295,23 @@ def expand_items(
 
 
 def final_transcript_text(name: str = "final_transcript_text"):
-    """Select final, non-empty text from a TranscriptEvent stream."""
+    """Select text from the canonical final-transcript filter."""
+
+    def apply(stream: Stream):
+        return final_transcripts()(stream).pipe(
+            ops.map(lambda event: event.text),
+            name=name,
+        )
+
+    return apply
+
+
+def final_transcripts(name: str = "final_transcripts"):
+    """Select final non-empty transcript events while retaining their context."""
 
     def apply(stream: Stream):
         return stream.pipe(
-            ops.filter(lambda event: event.is_final),
-            ops.map(lambda event: event.text),
-            ops.filter(lambda text: bool(text and text.strip())),
+            ops.filter(lambda event: event.is_final and bool(event.text and event.text.strip())),
             name=name,
         )
 

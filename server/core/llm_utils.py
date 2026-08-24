@@ -56,14 +56,6 @@ def split_spoken_written(text):
     return {"spoken": spoken, "written": written}
 
 
-def numpy_to_base64(np_array, format="PNG"):
-    pil_img = PILImage.fromarray(np_array.astype("uint8"))
-    buffer = io.BytesIO()
-    pil_img.save(buffer, format=format)
-    buffer.seek(0)
-    return base64.b64encode(buffer.read()).decode("utf-8")
-
-
 def groq_model_id(model_id: str) -> str:
     return model_id.split(":", 1)[1] if model_id.startswith("groq:") else model_id
 

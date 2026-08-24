@@ -16,6 +16,7 @@ class TranscriptEvent:
     text: str
     is_final: bool
     utterance_id: str | None = None
+    context: Any = None
 
 
 @dataclass(frozen=True)

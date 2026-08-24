@@ -1,5 +1,6 @@
 import asyncio
 import os
+import uuid
 
 import numpy as np
 import reactivex
@@ -10,6 +11,7 @@ from dataclasses import dataclass
 from typing import Any, Callable, Optional, Tuple
 
 from .events import SpeechEvent
+from .turn_source import TurnContext
 
 # Singleton instances
 _VAD_MODEL = None
@@ -246,6 +248,7 @@ def get_vad_model() -> Tuple[Any, Any]:
 class VadEmission:
     segment: Optional[np.ndarray] = None
     signal: Optional[SpeechEvent] = None
+    context: Optional[TurnContext] = None
 
 
 def _build_is_speech(
@@ -306,6 +309,7 @@ def turn_detector_vad(
             ) from None
 
         buffer = []
+        context = [None]
         last_speech_time = [0.0]
         disposed = [False]
 
@@ -314,8 +318,9 @@ def turn_detector_vad(
                 return
             if is_speech(chunk):
                 if not buffer:
+                    context[0] = TurnContext(uuid.uuid4().hex)
                     print("[interrupt] VAD SPEECH_START")
-                    observer.on_next(VadEmission(signal=SpeechEvent.SPEECH_START))
+                    observer.on_next(VadEmission(signal=SpeechEvent.SPEECH_START, context=context[0]))
                 buffer.append(chunk)
                 last_speech_time[0] = time.monotonic()
 
@@ -325,10 +330,11 @@ def turn_detector_vad(
             if not force and (time.monotonic() - last_speech_time[0]) < silence_timeout:
                 return
             print("[interrupt] VAD SPEECH_END")
-            observer.on_next(VadEmission(signal=SpeechEvent.SPEECH_END))
+            observer.on_next(VadEmission(signal=SpeechEvent.SPEECH_END, context=context[0]))
             segment = np.concatenate(buffer, axis=0)
             buffer.clear()
-            observer.on_next(VadEmission(segment=segment))
+            observer.on_next(VadEmission(segment=segment, context=context[0]))
+            context[0] = None
 
         def on_completed():
             emit_segment_if_ready(force=True)

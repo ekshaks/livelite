@@ -3,21 +3,20 @@
 from __future__ import annotations
 
 import asyncio
-import base64
-import hashlib
-import hmac
 import json
 import logging
 import os
 import secrets
 import time
 from dataclasses import dataclass
+from dataclasses import replace
 
 from openai import AsyncOpenAI
 from .events import SpeechEvent
 from .multimodal_pipeline import run_voice_turn
 from .stt.pinned import PinnedWhisper
-from .turn_source import PTTTurnSource, TurnSignal, TurnStreams, VADTurnSource, VoiceTurn
+from .token_signing import decode_json, encode_json, sign, signature_matches
+from .turn_source import PTTTurnSource, TurnContext, TurnSignal, TurnStreams, VADTurnSource, VoiceTurn
 from .turndet import _build_is_speech
 from .tts_providers.kokoro_fastapi import _kokoro_fastapi_base_url
 from .websocket_audio import WebSocketPCMOutput
@@ -45,17 +44,17 @@ class VoiceTokenStore:
 
     def issue(self, principal: VoicePrincipal) -> str:
         payload = {"sub": principal.subject, "name": principal.display_name, "aud": PROTOCOL, "exp": int(time.time()) + self.ttl_seconds, "jti": secrets.token_urlsafe(16)}
-        encoded = _encode(payload)
-        return f"{encoded}.{_sign(self.secret, encoded)}"
+        encoded = encode_json(payload)
+        return f"{encoded}.{sign(self.secret, encoded)}"
 
     def consume(self, token: str | None) -> VoicePrincipal | None:
         try:
             now = int(time.time())
             self.used = {jti: exp for jti, exp in self.used.items() if exp >= now}
             encoded, signature = (token or "").split(".", 1)
-            if not hmac.compare_digest(_sign(self.secret, encoded), signature):
+            if not signature_matches(self.secret, encoded, signature):
                 return None
-            payload = json.loads(_decode(encoded))
+            payload = decode_json(encoded)
             if payload["aud"] != PROTOCOL or int(payload["exp"]) < now or payload["jti"] in self.used:
                 return None
             self.used[payload["jti"]] = int(payload["exp"])
@@ -85,8 +84,8 @@ class VoicePipeline:
     async def wait_ready(self) -> None:
         await asyncio.wait_for(self.stt.wait_ready(), timeout=self.stt_load_timeout_seconds)
 
-    async def run(self, pcm16, cancelled, is_current, emit, audio_output, turn_id) -> None:
-        await run_voice_turn(pcm16, transcribe=self.stt.transcribe, stt_timeout_seconds=self.stt_timeout_seconds, llm_model=self.llm_model, cancelled=cancelled, is_current=is_current, emit=emit, audio_output=audio_output, turn_id=turn_id, companion_for_text=getattr(self, "companion_for_text", _default_assistant_identity), response_id_factory=lambda: secrets.token_urlsafe(12), tts_client=getattr(self, "tts_client", None))
+    async def run(self, pcm16, context, is_current, emit, audio_output) -> None:
+        await run_voice_turn(pcm16, context=context, transcribe=self.stt.transcribe, stt_timeout_seconds=self.stt_timeout_seconds, llm_model=self.llm_model, is_current=is_current, emit=emit, audio_output=audio_output, companion_for_text=getattr(self, "companion_for_text", _default_assistant_identity), response_id_factory=lambda: secrets.token_urlsafe(12), tts_client=getattr(self, "tts_client", None))
 
     def close(self) -> None:
         self.stt.shutdown()
@@ -110,8 +109,8 @@ class VoiceSession:
         self.source = None
         self._events_task: asyncio.Task | None = None
         self._response_task: asyncio.Task | None = None
-        self._cancelled = asyncio.Event()
         self._generation = 0
+        self._response_context: TurnContext | None = None
         self._response_turn_id: str | None = None
         self.sequence = 0
 
@@ -176,31 +175,35 @@ class VoiceSession:
         await self._cancel_response(emit_cancelled=False)
         self._generation += 1
         generation = self._generation
-        self._cancelled = asyncio.Event()
+        context = replace(turn.context, generation=generation)
+        self._response_context = context
         self._response_turn_id = turn.turn_id
         await self.emit({"type": "turn.committed", "turn_id": turn.turn_id})
-        self._response_task = asyncio.create_task(self._run(turn, generation), name=f"voice:{turn.turn_id}")
+        self._response_task = asyncio.create_task(self._run(turn, context), name=f"voice:{turn.turn_id}")
 
-    async def _run(self, turn: VoiceTurn, generation: int) -> None:
+    async def _run(self, turn: VoiceTurn, context: TurnContext) -> None:
         try:
-            await self.pipeline.run(turn.pcm16, self._cancelled, lambda: generation == self._generation and not self._cancelled.is_set(), self.emit, self.audio_output, turn.turn_id)
+            await self.pipeline.run(turn.pcm16, context, lambda: self._response_context is context and not context.cancelled.is_set(), self.emit, self.audio_output)
         except asyncio.CancelledError:
             pass
         except Exception as exc:
-            if generation == self._generation:
+            if self._response_context is context:
                 logger.exception("voice pipeline failed turn_id=%s", turn.turn_id)
                 await self.emit({"type": "error", "turn_id": turn.turn_id, "text": f"pipeline failed: {type(exc).__name__}"})
         finally:
-            if generation == self._generation:
+            if self._response_context is context:
                 self._response_task = None
                 self._response_turn_id = None
+                self._response_context = None
 
     async def _cancel_response(self, *, emit_cancelled: bool) -> None:
         task, turn_id = self._response_task, self._response_turn_id
         if task is None:
             return
         self._generation += 1
-        self._cancelled.set()
+        if self._response_context is not None:
+            self._response_context.cancelled.set()
+            self._response_context = None
         task.cancel()
         self.audio_output.clear()
         self._response_task = None
@@ -227,15 +230,3 @@ class VoiceSession:
 
 def _voice_is_speech():
     return _build_is_speech(threshold=0.4, min_speech_duration_ms=100, min_silence_duration_ms=2000, speech_pad_ms=200, rate=PCM16_SAMPLE_RATE)
-
-
-def _encode(value: dict) -> str:
-    return base64.urlsafe_b64encode(json.dumps(value, separators=(",", ":")).encode()).decode().rstrip("=")
-
-
-def _decode(value: str) -> str:
-    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4)).decode()
-
-
-def _sign(secret: bytes, encoded: str) -> str:
-    return base64.urlsafe_b64encode(hmac.new(secret, encoded.encode(), hashlib.sha256).digest()).decode().rstrip("=")

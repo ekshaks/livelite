@@ -221,17 +221,19 @@ def whisper_stt(
     backend = PinnedWhisper(mode=mode, model_size=model_size, **kwargs)
 
     async def transcribe(segment):
+        context = getattr(segment, "context", None)
+        samples = getattr(segment, "samples", segment)
         if debug_audio_dir:
-            _dump_stt_audio(segment, debug_audio_dir)
+            _dump_stt_audio(samples, debug_audio_dir)
         if backend.is_loading():
             notify(on_status, "loading", {"model_size": model_size})
         try:
-            text = await asyncio.wait_for(backend.transcribe(segment), timeout=timeout_s)
+            text = await asyncio.wait_for(backend.transcribe(samples), timeout=timeout_s)
         except asyncio.TimeoutError:
             return transcription_failed(f"timed out after {timeout_s:g}s", model_size, on_status)
         except Exception as exc:  # noqa: BLE001 - one bad segment must not deafen us
             return transcription_failed(f"{type(exc).__name__}: {exc}", model_size, on_status)
         notify(on_status, "ready", {"model_size": model_size})
-        return TranscriptEvent(text=text or "", is_final=True)
+        return TranscriptEvent(text=text or "", is_final=True, context=context)
 
     return async_map_stage(transcribe, name=name, on_dispose=backend.shutdown)
