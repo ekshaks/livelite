@@ -50,5 +50,8 @@ class AudioOutput(Protocol):
     async def write(self, chunk: AudioChunk) -> None:
         """Queue an audio chunk for emission."""
 
+    async def wait_until_drained(self) -> None:
+        """Wait until all queued audio has been emitted."""
+
     def clear(self) -> None:
         """Drop audio that has been queued but not yet emitted."""

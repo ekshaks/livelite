@@ -1,6 +1,5 @@
 import re
 
-from .audio_output import AudioOutput
 from .logging_utils import log_text_block, monitor_log
 from .events import ClientTranscriptMessage
 from .stream_dsl import client_message_sink, expand_items, map_items
@@ -140,18 +139,10 @@ def add_tts(
     if mode is None:
         return
 
-    if mode == "local":
-        output = None
-        output_mode = "local"
-    elif mode == "browser":
-        output = audio_output
-        if output is None:
-            raise RuntimeError("Browser TTS requested, but no audio output is available")
-        if not isinstance(output, AudioOutput):
-            raise TypeError("Browser TTS requires an AudioOutput implementation")
-        output_mode = "webrtc"
-    else:
+    output_mode = {"local": "local", "browser": "webrtc"}.get(mode)
+    if output_mode is None:
         raise ValueError(f"Unknown TTS mode: {mode}")
+    output = audio_output if output_mode == "webrtc" else None
 
     canonical_provider = _resolve_tts_provider_name(provider)
     tts_provider = make_tts_provider(canonical_provider, output_mode, output)

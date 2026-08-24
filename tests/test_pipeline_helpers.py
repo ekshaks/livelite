@@ -16,6 +16,9 @@ class FakeAudioOutput:
     async def write(self, chunk: AudioChunk) -> None:
         del chunk
 
+    async def wait_until_drained(self) -> None:
+        pass
+
     def clear(self) -> None:
         pass
 

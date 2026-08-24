@@ -75,9 +75,7 @@ async def run_voice_turn(
     else:
         await _tts_kokoro_stream_chunks(spoken, cancelled, write_audio, client=tts_client)
     if not cancelled.is_set() and is_current():
-        wait_until_drained = getattr(audio_output, "wait_until_drained", None)
-        if wait_until_drained is not None:
-            await wait_until_drained()
+        await audio_output.wait_until_drained()
         if is_current():
             await emit({"type": "response.finished", "turn_id": turn_id, "response_id": response_id})
 
@@ -184,7 +182,13 @@ class WebRTCVoiceTurnRunner:
             pass
         except Exception as exc:
             if is_current():
-                print(f"WebRTC voice turn failed: {type(exc).__name__}: {exc}")
+                self.session.send_to_client(
+                    {
+                        "type": "error",
+                        "turn_id": context.turn_id,
+                        "text": f"pipeline failed: {type(exc).__name__}",
+                    }
+                )
         finally:
             if self._active_context is context:
                 self._active_context = None

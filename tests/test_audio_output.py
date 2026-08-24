@@ -13,6 +13,7 @@ from server.core.session import SessionContext
 from server.core.tts_providers.factory import TTSConfig, create_tts_provider
 from server.core.tts_providers import kokoro_fastapi, kokoro_onnx, piper
 from server.core.webrtc_audio import AssistantAudioTrack
+from server.core.websocket_audio import WebSocketPCMOutput
 from server.setup_tracks import pc_session_setup
 
 
@@ -22,6 +23,9 @@ class FakeAudioOutput:
 
     async def write(self, chunk: AudioChunk) -> None:
         self.chunks.append(chunk)
+
+    async def wait_until_drained(self) -> None:
+        pass
 
     def clear(self) -> None:
         self.chunks.clear()
@@ -153,6 +157,15 @@ class AudioOutputTests(unittest.TestCase):
 
 
 class WebRTCAudioOutputTests(unittest.IsolatedAsyncioTestCase):
+    async def test_concrete_outputs_satisfy_drain_contract(self):
+        async def send_bytes(_payload):
+            pass
+
+        websocket = WebSocketPCMOutput(send_bytes, asyncio.Lock())
+        self.assertIsInstance(websocket, AudioOutput)
+        self.assertIsInstance(AssistantAudioTrack(), AudioOutput)
+        await websocket.close()
+
     async def test_track_accepts_typed_audio_chunk(self):
         output = AssistantAudioTrack(sample_rate=16000)
         samples = np.array([1, -1, 2, -2], dtype=np.int16)
