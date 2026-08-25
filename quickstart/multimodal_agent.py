@@ -7,11 +7,94 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
-from server.core.multimodal_pipeline import run_multimodal_session
+from server.core.llm_utils import call_llm, create_agent
+from server.core.multimodal_pipeline import WebRTCVoiceTurnRunner
+from server.core.pipeline_helpers import make_tts_provider
+from server.core.stream_dsl import Stream, SubGroup, final_transcripts, stt, turn_detector
 from server.core.server_config import web_config
 
 
 PROMPTS_FILE = Path(__file__).parent / "prompts.yml"
+
+
+async def run_multimodal_session(
+    session,
+    *,
+    mode="av",
+    stt_provider="mlx",
+    stt_model_size="tiny",
+    stt_model=None,
+    stt_language="en",
+    stt_kwargs=None,
+    llm_model,
+    prompts_path=PROMPTS_FILE,
+    prompt_id="visual_solver",
+    agent_name="Agent",
+    tts_mode=None,
+    tts_provider="kokoro_fastapi",
+):
+    """Compose the generic voice core for the visual quickstart demo."""
+    await session.wait_until_ready()
+    subs = SubGroup()
+    latest_frame = Stream.source(session.video_input, name="video").latest(
+        name="latest_frame", subs=subs
+    )
+    turn = Stream.source(session.audio_input, name="audio") | turn_detector()
+    transcripts = turn.turns | stt(
+        provider=stt_provider,
+        model=stt_model,
+        model_size=stt_model_size,
+        language=stt_language,
+        **(stt_kwargs or {}),
+    )
+    completed = transcripts | final_transcripts()
+    agent = create_agent(
+        llm_model,
+        prompts_path=prompts_path,
+        prompt_id=prompt_id,
+        name=agent_name,
+    )
+
+    async def answer(text):
+        return await call_llm(agent, text, latest_frame.get(), mode)
+
+    tts = None
+    if tts_mode is not None:
+        output_mode = {"local": "local", "browser": "webrtc"}.get(tts_mode)
+        if output_mode is None:
+            raise ValueError(f"Unknown TTS mode: {tts_mode}")
+        tts = make_tts_provider(
+            tts_provider,
+            output_mode,
+            session.audio_output if output_mode == "webrtc" else None,
+        )
+
+    async def speak(text, cancelled, _audio_output):
+        if tts is not None and text.strip():
+            await tts.speak(text, cancelled)
+
+    runner = WebRTCVoiceTurnRunner(session=session, answer=answer, speak=speak)
+    turn.events.to(
+        lambda stream: stream.subscribe(runner.on_vad_event),
+        name="quickstart_barge_in",
+        subs=subs,
+    )
+    completed.to(
+        lambda stream: stream.subscribe(
+            lambda event: runner.start(event.text, event.context)
+        ),
+        name="quickstart_voice_turns",
+        subs=subs,
+    )
+    try:
+        await session.closed.wait()
+    finally:
+        latest_frame.dispose()
+        subs.dispose()
+        await runner.aclose()
+        close = getattr(tts, "aclose", None)
+        if close is not None:
+            await close()
 
 
 async def run_session(

@@ -4,7 +4,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from server.core.app_config import app_section, load_app_config
+from server.apps.app_config import app_section, load_app_config
 
 from .config_merge import active_profiles, load_bundle_layers, load_infra_layers
 from .registry import APP_ID_RE, AppDefinition, AppRegistry

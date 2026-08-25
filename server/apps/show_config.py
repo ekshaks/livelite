@@ -19,7 +19,7 @@ from pathlib import Path
 
 import yaml
 
-from server.core.app_config import load_app_config
+from server.apps.app_config import load_app_config
 
 from .config_merge import active_profiles, load_bundle_layers, load_infra_layers
 

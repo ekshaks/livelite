@@ -2,7 +2,7 @@ import argparse
 import os
 from pathlib import Path
 
-from server.core.app_config import app_section
+from server.apps.app_config import app_section
 from server.core.auth import AppAuthentication
 from server.core.server_config import web_config
 from server.core.user_profiles import load_user_directory

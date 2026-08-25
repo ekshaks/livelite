@@ -7,8 +7,7 @@ from .tts_providers import tts_sink
 from .tts_providers.factory import TTSConfig, create_tts_provider
 
 # Split after sentence/clause punctuation (plus any closing quotes/brackets)
-# followed by whitespace. Same boundary the spell app uses for its per-phrase
-# TTS requests; hoisted here so every pipeline can share it.
+# followed by whitespace so every pipeline can share the same phrase boundary.
 SPOKEN_PHRASE_BOUNDARY = re.compile(r'(?<=[,.!?;:])(?:["\')\]]+)?\s+')
 
 
@@ -72,11 +71,7 @@ _TTS_PROVIDER_ALIASES = {"kokoro": "kokoro_fastapi"}
 def _resolve_tts_provider_name(provider_name):
     """Canonicalize a TTS provider identifier (translating legacy aliases).
 
-    Historically the muapps configs used ``provider: kokoro`` to mean
-    "Kokoro-FastAPI HTTP server". Newer providers (``kokoro_onnx``,
-    ``piper``) introduced explicit names, so the bare ``"kokoro"`` value is
-    treated as an alias to keep old configs working without a silent switch
-    in behavior.
+    Treat the legacy ``"kokoro"`` value as an alias for the FastAPI provider.
     """
     return _TTS_PROVIDER_ALIASES.get(provider_name, provider_name)
 
@@ -103,12 +98,7 @@ def add_kokoro_tts(
     provider="kokoro_fastapi",
     name_prefix="kokoro",
 ):
-    """Attach a TTS sink to ``stream``.
-
-    Backwards-compatible alias for :func:`add_tts`. Kept as ``add_kokoro_tts``
-    so existing muapp entrypoints (spell, chess) don't need to be updated
-    beyond passing the new ``provider`` argument.
-    """
+    """Attach a TTS sink to ``stream`` using the legacy helper name."""
     return add_tts(
         stream,
         audio_output,

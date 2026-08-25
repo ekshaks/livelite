@@ -14,7 +14,7 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
-from server.core.app_config import load_bundle_config_with_profile
+from server.apps.app_config import load_bundle_config_with_profile
 
 
 def _write(path: Path, content: str) -> None:

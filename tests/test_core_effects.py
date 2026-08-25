@@ -7,7 +7,7 @@ from reactivex.subject import Subject
 
 from server.apps.app_output import AppOutput, output
 from server.apps.effects import EffectRunner
-from server.core.events import AppFeedback
+from server.apps.events import FeedbackEvent
 from server.apps.prompts import (
     extract_json_object,
     load_prompt_instructions,
@@ -166,7 +166,7 @@ class AppOutputTests(unittest.TestCase):
         self.assertIsNone(packet.feedback)
 
     def test_all_fields_pass_through(self):
-        feedback = AppFeedback("chess_position", "update", {"fen": "start"})
+        feedback = FeedbackEvent("chess_position", "update", {"fen": "start"})
         packet = output(
             "state",
             "hi",

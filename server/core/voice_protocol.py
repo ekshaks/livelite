@@ -10,10 +10,11 @@ import secrets
 import time
 from dataclasses import dataclass
 from dataclasses import replace
+from typing import Protocol
 
 from openai import AsyncOpenAI
 from .events import SpeechEvent
-from .multimodal_pipeline import run_voice_turn
+from .voice_engine import run_voice_turn
 from .stt.pinned import PinnedWhisper
 from .token_signing import decode_json, encode_json, sign, signature_matches
 from .turn_source import PTTTurnSource, TurnContext, TurnSignal, TurnStreams, VADTurnSource, VoiceTurn
@@ -30,6 +31,16 @@ logger = logging.getLogger("uvicorn.error")
 class VoicePrincipal:
     subject: str
     display_name: str
+
+
+class VoiceHandler(Protocol):
+    """Generic app-owned voice pipeline supplied to a transport server."""
+
+    async def wait_ready(self) -> None: ...
+
+    async def run(self, pcm16, context, is_current, emit, audio_output) -> None: ...
+
+    async def aclose(self) -> None: ...
 
 
 class VoiceTokenStore:
@@ -63,29 +74,34 @@ class VoiceTokenStore:
             return None
 
 
-def _default_assistant_identity(_text: str) -> str:
-    """Return the transport-neutral identity used when an app supplies none."""
-    return "assistant"
-
-
 class VoicePipeline:
     """Provider configuration for the transport-neutral voice turn engine."""
 
-    def __init__(self, *, companion_for_text=_default_assistant_identity):
-        self.stt = PinnedWhisper(mode=os.getenv("MULIVE_VOICE_STT_MODE", "faster_whisper"), model_size=os.getenv("MULIVE_VOICE_STT_MODEL", "tiny"))
-        self.stt_timeout_seconds = float(os.getenv("MULIVE_VOICE_STT_TIMEOUT_SECONDS", "30"))
-        self.stt_load_timeout_seconds = float(os.getenv("MULIVE_VOICE_STT_LOAD_TIMEOUT_SECONDS", "180"))
+    def __init__(self, *, config: dict | None = None):
+        config = config or {}
+        stt_config = config.get("stt") or {}
+        tts_config = config.get("tts") or {}
+        models_config = config.get("models") or {}
+        self.stt = PinnedWhisper(
+            mode=stt_config.get("provider") or os.getenv("MULIVE_VOICE_STT_MODE", "faster_whisper"),
+            model_size=stt_config.get("model_size") or os.getenv("MULIVE_VOICE_STT_MODEL", "tiny"),
+            language=stt_config.get("language", "en"),
+        )
+        self.stt_timeout_seconds = float(stt_config.get("timeout_seconds") or os.getenv("MULIVE_VOICE_STT_TIMEOUT_SECONDS", "30"))
+        self.stt_load_timeout_seconds = float(stt_config.get("load_timeout_seconds") or os.getenv("MULIVE_VOICE_STT_LOAD_TIMEOUT_SECONDS", "180"))
         if self.stt_timeout_seconds <= 0 or self.stt_load_timeout_seconds <= 0:
             raise ValueError("voice STT timeouts must be positive")
-        self.llm_model = os.getenv("MULIVE_VOICE_LLM_MODEL", "openai/gpt-oss-20b")
-        self.tts_client = AsyncOpenAI(base_url=_kokoro_fastapi_base_url(), api_key="not-needed")
-        self.companion_for_text = companion_for_text
+        self.llm_model = models_config.get("text") or os.getenv("MULIVE_VOICE_LLM_MODEL", "openai/gpt-oss-20b")
+        self.tts_client = AsyncOpenAI(
+            base_url=tts_config.get("base_url") or _kokoro_fastapi_base_url(),
+            api_key="not-needed",
+        )
 
     async def wait_ready(self) -> None:
         await asyncio.wait_for(self.stt.wait_ready(), timeout=self.stt_load_timeout_seconds)
 
     async def run(self, pcm16, context, is_current, emit, audio_output) -> None:
-        await run_voice_turn(pcm16, context=context, transcribe=self.stt.transcribe, stt_timeout_seconds=self.stt_timeout_seconds, llm_model=self.llm_model, is_current=is_current, emit=emit, audio_output=audio_output, companion_for_text=getattr(self, "companion_for_text", _default_assistant_identity), response_id_factory=lambda: secrets.token_urlsafe(12), tts_client=getattr(self, "tts_client", None))
+        await run_voice_turn(pcm16, context=context, transcribe=self.stt.transcribe, stt_timeout_seconds=self.stt_timeout_seconds, llm_model=self.llm_model, is_current=is_current, emit=emit, audio_output=audio_output, response_id_factory=lambda: secrets.token_urlsafe(12), tts_client=getattr(self, "tts_client", None))
 
     def close(self) -> None:
         self.stt.shutdown()
@@ -98,12 +114,14 @@ class VoicePipeline:
 class VoiceSession:
     """Mode-selected turn source plus shared engine and serialized output."""
 
-    def __init__(self, principal: VoicePrincipal, pipeline: VoicePipeline, send_json, send_bytes):
+    def __init__(self, principal: VoicePrincipal, pipeline: VoiceHandler | None, send_json, send_bytes):
         self.principal, self.pipeline = principal, pipeline
         self._send_json, self._send_bytes = send_json, send_bytes
         self._send_lock = asyncio.Lock()
         self.audio_output = WebSocketPCMOutput(send_bytes, self._send_lock)
         self.ready = False
+        self.closed = asyncio.Event()
+        self._ready_event = asyncio.Event()
         self.mode: str | None = None
         self.streams: TurnStreams | None = None
         self.source = None
@@ -113,6 +131,14 @@ class VoiceSession:
         self._response_context: TurnContext | None = None
         self._response_turn_id: str | None = None
         self.sequence = 0
+
+    def set_handler(self, handler: VoiceHandler) -> None:
+        if self.pipeline is not None:
+            raise RuntimeError("voice handler already configured")
+        self.pipeline = handler
+
+    async def wait_until_ready(self) -> None:
+        await self._ready_event.wait()
 
     @property
     def turn_id(self) -> str | None:
@@ -135,6 +161,7 @@ class VoiceSession:
             self.ready, self.mode, self.streams = True, mode, TurnStreams()
             self.source = PTTTurnSource(self.streams) if mode == "ptt" else VADTurnSource(self.streams, _voice_is_speech())
             self._events_task = asyncio.create_task(self._consume_source_events(), name="voice-turn-events")
+            self._ready_event.set()
             await self.emit({"type": "session.ready", "protocol": PROTOCOL, "mode": mode, "subject": self.principal.subject})
             return
         if self.mode == "ptt":
@@ -146,10 +173,22 @@ class VoiceSession:
             elif kind == "turn.commit":
                 await self.source.commit(event.get("turn_id"))
             elif kind == "turn.cancel":
-                self.source.cancel(event.get("turn_id"))
+                cancelled_turn_id = event.get("turn_id")
+                await self._cancel_pending_action(cancelled_turn_id)
+                self.source.cancel(cancelled_turn_id)
                 await self._cancel_response(emit_cancelled=False)
+                if cancelled_turn_id:
+                    await self.emit({"type": "turn.finished", "turn_id": cancelled_turn_id, "outcome": "cancelled"})
+            else:
+                if self.pipeline is None or not hasattr(self.pipeline, "handle_client_event"):
+                    raise ValueError("unsupported client event")
+                await self.pipeline.handle_client_event(event, self.emit)
         elif kind in {"turn.start", "turn.commit", "turn.cancel"}:
             raise ValueError("PTT events are invalid in vad mode")
+        else:
+            if self.pipeline is None or not hasattr(self.pipeline, "handle_client_event"):
+                raise ValueError("unsupported client event")
+            await self.pipeline.handle_client_event(event, self.emit)
 
     async def handle_pcm16(self, payload: bytes) -> None:
         if not self.ready or self.source is None:
@@ -165,6 +204,7 @@ class VoiceSession:
                 event = await self.streams.events.get()
                 if isinstance(event, TurnSignal):
                     if event.event == SpeechEvent.SPEECH_START:
+                        await self._cancel_pending_action()
                         await self._cancel_response(emit_cancelled=True)
                 elif isinstance(event, VoiceTurn):
                     await self._start_response(event)
@@ -183,6 +223,8 @@ class VoiceSession:
 
     async def _run(self, turn: VoiceTurn, context: TurnContext) -> None:
         try:
+            if self.pipeline is None:
+                raise RuntimeError("voice handler is not configured")
             await self.pipeline.run(turn.pcm16, context, lambda: self._response_context is context and not context.cancelled.is_set(), self.emit, self.audio_output)
         except asyncio.CancelledError:
             pass
@@ -190,6 +232,7 @@ class VoiceSession:
             if self._response_context is context:
                 logger.exception("voice pipeline failed turn_id=%s", turn.turn_id)
                 await self.emit({"type": "error", "turn_id": turn.turn_id, "text": f"pipeline failed: {type(exc).__name__}"})
+                await self.emit({"type": "turn.finished", "turn_id": turn.turn_id, "outcome": "failed", "reason": type(exc).__name__})
         finally:
             if self._response_context is context:
                 self._response_task = None
@@ -210,8 +253,18 @@ class VoiceSession:
         self._response_turn_id = None
         if emit_cancelled and turn_id is not None:
             await self.emit({"type": "response.cancelled", "turn_id": turn_id})
+            await self.emit({"type": "turn.finished", "turn_id": turn_id, "outcome": "cancelled"})
+
+    async def _cancel_pending_action(self, turn_id: str | None = None) -> None:
+        if self.pipeline is None:
+            return
+        cancel_pending = getattr(self.pipeline, "cancel_for_new_turn", None)
+        if cancel_pending is not None:
+            await cancel_pending(turn_id)
 
     async def cancel(self) -> None:
+        self.closed.set()
+        await self._cancel_pending_action()
         if self.source is not None:
             self.source.cancel()
         await self._cancel_response(emit_cancelled=False)

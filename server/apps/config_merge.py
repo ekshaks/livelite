@@ -20,7 +20,7 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from server.core.app_config import load_app_config
+from server.apps.app_config import load_app_config
 
 DEFAULT_PROFILE = "local"
 

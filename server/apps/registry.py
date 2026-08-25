@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
 
-from server.core.app_config import UI_API_VERSION
+from server.apps.app_config import UI_API_VERSION
 
 
 APP_ID_RE = re.compile(r"^[a-z][a-z0-9-]*$")

@@ -11,7 +11,7 @@ here.
 from dataclasses import dataclass, field
 from typing import Any
 
-from server.core.events import AppFeedback
+from server.apps.events import FeedbackEvent
 
 
 @dataclass
@@ -30,7 +30,7 @@ class AppOutput:
     state: Any = None
     finished: bool = False
     effect: Any = None
-    feedback: AppFeedback | None = None
+    feedback: FeedbackEvent | None = None
 
 
 def output(
@@ -38,7 +38,7 @@ def output(
     *messages: str,
     finished: bool = False,
     effect: Any = None,
-    feedback: AppFeedback | None = None,
+    feedback: FeedbackEvent | None = None,
 ) -> AppOutput:
     """Build an ``AppOutput``, dropping empty messages.
 

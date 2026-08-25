@@ -1,8 +1,10 @@
+"""Application-bundle configuration and UI-facing web configuration."""
+
 from pathlib import Path
 
 import yaml
 
-from .server_config import web_config
+from server.core.server_config import web_config
 
 UI_API_VERSION = 2
 
@@ -23,31 +25,8 @@ def load_app_config(path):
 
 
 def load_bundle_config_with_profile(config_path):
-    """Load a per-app config with the same defaults + profile stacking as ``run_apps``.
-
-    Standalone entrypoints (``python -m muapps.<app>.app``) historically
-    called :func:`load_app_config` directly on their ``config.yml``, so
-    they saw only the per-app file — missing the shared ``defaults:``
-    block in ``muapps/apps.yml`` and any ``MULIVE_PROFILE`` overrides.
-    That divergence produced silent misroutes on AWS (e.g. TTS falling
-    back to ``kokoro_fastapi`` because the per-app file redeclared it).
-
-    This helper reproduces the same merge that
-    ``server.apps.loader.load_app_bundle`` performs:
-
-    1. Walk up from ``config_path`` to find the enclosing ``apps.yml``.
-    2. If found (and schema 2), collect the infra layers (``defaults:``
-       plus every ``apps.<profile>.yml`` for the active profiles).
-    3. Merge those infra layers under the bundle's ``config.yml`` and
-       every ``config.<profile>.yml`` next to it.
-    4. If no ``apps.yml`` is found, fall back to the plain single-file
-       load so callers outside the muapps tree keep working.
-    """
-    from server.apps.config_merge import (
-        active_profiles,
-        load_bundle_layers,
-        load_infra_layers,
-    )
+    """Load a bundle config with shared defaults and active profile overrides."""
+    from .config_merge import active_profiles, load_bundle_layers, load_infra_layers
 
     config_path = Path(config_path).resolve()
     bundle_dir = config_path.parent
@@ -66,15 +45,6 @@ def load_bundle_config_with_profile(config_path):
 
 
 def _find_apps_catalog(start_dir):
-    """Find the nearest enclosing ``apps.yml`` above ``start_dir`` (inclusive).
-
-    We only walk up two levels — the catalog is expected to sit at
-    ``muapps/apps.yml`` next to the bundle directory, so
-    ``bundle_dir.parent / 'apps.yml'`` is the natural first hit. A second
-    parent hop covers unusual layouts (e.g. a bundle nested one level
-    deep). Beyond that we don't guess — callers can point at an explicit
-    catalog via the env var below.
-    """
     import os
 
     override = os.environ.get("MULIVE_APPS_CATALOG")

@@ -1,4 +1,4 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any
 
@@ -29,19 +29,4 @@ class ClientTranscriptMessage:
             "type": "transcript",
             "role": self.role,
             "content": self.content,
-        }
-
-
-@dataclass(frozen=True)
-class AppFeedback:
-    name: str
-    result: str
-    data: dict[str, Any] = field(default_factory=dict)
-
-    def to_client_dict(self) -> dict[str, Any]:
-        return {
-            "type": "app_feedback",
-            "name": self.name,
-            "result": self.result,
-            "data": self.data,
         }
