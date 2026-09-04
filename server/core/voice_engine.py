@@ -14,7 +14,7 @@ async def run_voice_turn(
     pcm16: bytes,
     *,
     context: TurnContext,
-    transcribe,
+    transcribe_turn,
     stt_timeout_seconds: float,
     llm_model: str,
     is_current,
@@ -31,7 +31,7 @@ async def run_voice_turn(
     cancelled = context.cancelled
     turn_id = context.turn_id
     try:
-        text = await (get_transcript() if get_transcript is not None else asyncio.wait_for(transcribe(np.frombuffer(pcm16, dtype=np.int16)), timeout=stt_timeout_seconds))
+        text = await (get_transcript() if get_transcript is not None else asyncio.wait_for(transcribe_turn(np.frombuffer(pcm16, dtype=np.int16)), timeout=stt_timeout_seconds))
     except TimeoutError:
         if is_current():
             await emit({"type": "error", "turn_id": turn_id, "text": "Speech recognition timed out. Try again."})

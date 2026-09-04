@@ -101,7 +101,7 @@ class AsyncMapStageTests(unittest.IsolatedAsyncioTestCase):
         subs = SubGroup()
         received = []
 
-        async def transcribe(segment):
+        async def transcribe_turn(segment):
             return TranscriptEvent(
                 text=str(int(segment.sum())),
                 is_final=True,
@@ -112,7 +112,7 @@ class AsyncMapStageTests(unittest.IsolatedAsyncioTestCase):
             silence_timeout=0.01,
             poll_interval=0.005,
         )
-        transcripts = turn.segments | async_map_stage(transcribe)
+        transcripts = turn.segments | async_map_stage(transcribe_turn)
         final_text = transcripts | final_transcript_text()
         final_text.to(
             lambda observable: observable.subscribe(received.append),

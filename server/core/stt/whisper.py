@@ -101,7 +101,7 @@ class WhisperSTT:
             self._model = get_whisper_model(self.mode, self.model_size, **self.kwargs)
         return self._model
 
-    def __call__(self, samples: np.ndarray) -> str:
+    def transcribe_turn(self, samples: np.ndarray) -> str:
         if len(samples) == 0:
             return ""
         start_time = time.perf_counter()
@@ -220,7 +220,7 @@ def whisper_stt(
     # off the event loop, and only one segment is ever being transcribed at a time.
     backend = PinnedWhisper(mode=mode, model_size=model_size, **kwargs)
 
-    async def transcribe(segment):
+    async def transcribe_turn(segment):
         context = getattr(segment, "context", None)
         samples = getattr(segment, "samples", segment)
         if debug_audio_dir:
@@ -228,7 +228,7 @@ def whisper_stt(
         if backend.is_loading():
             notify(on_status, "loading", {"model_size": model_size})
         try:
-            text = await asyncio.wait_for(backend.transcribe(samples), timeout=timeout_s)
+            text = await asyncio.wait_for(backend.transcribe_turn(samples), timeout=timeout_s)
         except asyncio.TimeoutError:
             return transcription_failed(f"timed out after {timeout_s:g}s", model_size, on_status)
         except Exception as exc:  # noqa: BLE001 - one bad segment must not deafen us
@@ -236,4 +236,4 @@ def whisper_stt(
         notify(on_status, "ready", {"model_size": model_size})
         return TranscriptEvent(text=text or "", is_final=True, context=context)
 
-    return async_map_stage(transcribe, name=name, on_dispose=backend.shutdown)
+    return async_map_stage(transcribe_turn, name=name, on_dispose=backend.shutdown)

@@ -92,7 +92,7 @@ class WebRTCVoiceTurnRunner:
             await run_voice_turn(
                 b"",
                 context=context,
-                transcribe=None,
+                transcribe_turn=None,
                 stt_timeout_seconds=0,
                 llm_model="",
                 is_current=is_current,

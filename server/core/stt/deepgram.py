@@ -36,7 +36,7 @@ class DeepgramSTT:
         self.smart_format = smart_format
         self.timeout_s = timeout_s
 
-    def transcribe(self, segment: np.ndarray) -> str:
+    def transcribe_turn(self, segment: np.ndarray) -> str:
         pcm = _pcm16_bytes(segment)
         if not pcm:
             return ""
@@ -119,11 +119,11 @@ def deepgram_stt(
         **kwargs,
     )
 
-    async def transcribe(segment):
+    async def transcribe_turn(segment):
         context = getattr(segment, "context", None)
         samples = getattr(segment, "samples", segment)
         try:
-            text = await asyncio.to_thread(client.transcribe, samples)
+            text = await asyncio.to_thread(client.transcribe_turn, samples)
         except Exception as exc:
             if on_status:
                 on_status("error", {"model": model, "reason": str(exc)})
@@ -132,4 +132,4 @@ def deepgram_stt(
             on_status("ready", {"model": model})
         return TranscriptEvent(text=text, is_final=True, context=context)
 
-    return async_map_stage(transcribe, name=name)
+    return async_map_stage(transcribe_turn, name=name)

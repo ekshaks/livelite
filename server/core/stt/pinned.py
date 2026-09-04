@@ -53,13 +53,13 @@ class PinnedWhisper:
 
     def _infer(self, segment):
         """Transcribe one segment. Runs on the worker thread."""
-        return self._stt_future.result()(segment)
+        return self._stt_future.result().transcribe_turn(segment)
 
     def is_loading(self) -> bool:
         """True while the model is still being loaded."""
         return not self._stt_future.done()
 
-    async def transcribe(self, segment):
+    async def transcribe_turn(self, segment):
         """Transcribe one audio segment on the worker thread.
 
         Args:

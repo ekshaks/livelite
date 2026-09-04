@@ -8,10 +8,10 @@ from fastapi.staticfiles import StaticFiles
 import pathlib
 from fastapi.websockets import WebSocketDisconnect
 
-from server.core.voice_protocol import VoiceHandler, VoicePipeline, VoicePrincipal, VoiceSession
+from server.core.ws_voice_protocols import STT_LLM_TTS_Flow, VoiceHandler, VoicePrincipal, VoiceSession
 
 logger = logging.getLogger("uvicorn.error")
-_pipeline: VoicePipeline | None = None  # compatibility hook for embedders/tests
+_pipeline: STT_LLM_TTS_Flow | None = None  # compatibility hook for embedders/tests
 
 def create_app(
     config: dict | None = None,
@@ -20,7 +20,7 @@ def create_app(
 ) -> FastAPI:
     """Create the generic voice WebSocket application.
 
-    The transport server uses the generic VoicePipeline defaults unless an
+    The transport server uses the generic STT_LLM_TTS_Flow defaults unless an
     application supplies a complete VoiceHandler.
     """
     app = FastAPI()
@@ -29,7 +29,7 @@ def create_app(
     assert frontend_dir.exists(), f"Frontend directory not found: {frontend_dir}"
     app.mount("/client", StaticFiles(directory=frontend_dir), name="client")
 
-    def voice_pipeline() -> VoicePipeline:
+    def voice_pipeline() -> STT_LLM_TTS_Flow:
         nonlocal pipeline
         global _pipeline
         if pipeline is not None:
@@ -37,13 +37,13 @@ def create_app(
         if _pipeline is not None:
             return _pipeline
         if pipeline is None:
-            pipeline = VoicePipeline(config=config)
+            pipeline = STT_LLM_TTS_Flow(config=config)
             _pipeline = pipeline
         return pipeline
 
     async def default_run_session(session):
         created = session.pipeline is None
-        handler = session.pipeline or voice_handler or VoicePipeline(
+        handler = session.pipeline or voice_handler or STT_LLM_TTS_Flow(
             config=config,
         )
         if session.pipeline is None:
