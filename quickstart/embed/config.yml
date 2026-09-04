@@ -1,0 +1,11 @@
+stt:
+  provider: faster_whisper
+  model_size: tiny
+  language: en
+
+vad:
+  backend: onnx
+
+tts:
+  enabled: true
+  provider: piper

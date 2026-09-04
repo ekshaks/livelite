@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="theme-color" content="#08111f">
+    <title>Mulive Embed Quickstart</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/themes/prism-tomorrow.min.css">
+    <link rel="stylesheet" href="/app/style.css">
+    <script defer src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/prism.min.js"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/prismjs@1.29.0/components/prism-python.min.js"></script>
+  </head>
+  <body>
+    <main class="embed-shell">
+      <header class="page-header">
+        <p class="eyebrow">Mulive</p>
+        <h1>Embed quickstart</h1>
+        <p class="introduction">Add listening and speaking to any FastAPI web app. </p>
+	<p> Local STT, TTS models.</p>
+      </header>
+
+      <div class="workspace">
+        <section class="panel listen-panel">
+          <header class="panel-header">
+            <div>
+              <p class="section-number">01</p>
+              <h2>Listen</h2>
+            </div>
+            <span class="panel-hint">Speech to text</span>
+          </header>
+          <div class="panel-body">
+            <div id="status" class="status-line" data-state="idle" role="status" aria-live="polite">
+              <span class="status-dot" aria-hidden="true"></span>
+              <span id="statusText">Choose a mode, then connect.</span>
+            </div>
+            <label class="field compact-field" for="mode">
+              <span>Listening mode</span>
+              <select id="mode">
+                <option value="ptt">Push to talk</option>
+                <option value="vad">Continuous speech</option>
+              </select>
+            </label>
+            <div class="controls">
+              <button id="connect" class="primary-action">Connect microphone</button>
+              <button id="talk" class="secondary-action" disabled>Hold to talk</button>
+            </div>
+            <div class="events-header">
+              <h3>Events</h3>
+              <span>Live protocol output</span>
+            </div>
+            <pre id="events" aria-live="polite">Events will appear here.</pre>
+          </div>
+        </section>
+
+        <section class="panel speak-panel">
+          <header class="panel-header">
+            <div>
+              <p class="section-number">02</p>
+              <h2>Speak</h2>
+            </div>
+            <span class="panel-hint">Text to speech</span>
+          </header>
+          <form id="speak-form" class="panel-body">
+            <label class="field" for="speech-text">
+              <span>Text to synthesize</span>
+              <textarea id="speech-text" rows="6">Welcome to Mulive Embed.</textarea>
+            </label>
+            <p class="field-help">No microphone access required. Text is sent through the configured TTS provider.</p>
+            <button id="speak" class="primary-action full-width" type="submit">
+              Speak text
+            </button>
+          </form>
+        </section>
+      </div>
+
+      <section class="integration-guide" aria-labelledby="integrationHeading">
+        <header class="guide-header">
+          <div>
+            <p class="section-number">03</p>
+            <h2 id="integrationHeading">Use it in your app</h2>
+          </div>
+          <p>One browser module and one FastAPI mount.</p>
+        </header>
+
+        <div class="code-grid">
+          <article class="code-card">
+            <h3>Frontend</h3>
+            <pre class="code-block"><code class="language-javascript">import { Mulive } from "/mulive/client/mulive.js";
+
+const voice = await Mulive.connect("/mulive-ws");
+voice.on("transcript.final", ({ text }) =&gt; console.log(text));
+
+listenButton.onclick = () =&gt; voice.start();
+speakButton.onclick = () =&gt; voice.speak("Hello!");</code></pre>
+          </article>
+
+          <article class="code-card">
+            <h3>Backend</h3>
+            <pre class="code-block"><code class="language-python">from fastapi import FastAPI
+from mulive import mount_voice
+
+app = FastAPI()
+mount_voice(app)</code></pre>
+          </article>
+        </div>
+      </section>
+    </main>
+    <script type="module" src="/app/app.js"></script>
+  </body>
+</html>
