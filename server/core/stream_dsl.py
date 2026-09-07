@@ -11,7 +11,6 @@ from reactivex import operators as ops
 from reactivex.disposable import CompositeDisposable
 
 from .logging_utils import monitor_log
-from .turn_source import AudioTurn
 
 
 class Sub:
@@ -133,16 +132,16 @@ def turn_detector(name: str = "turn_detector", **kwargs):
             ),
             signals=Stream(
                 events.pipe(
-                    ops.filter(lambda event: event.signal is not None),
-                    ops.map(lambda event: event.signal),
+                    ops.filter(lambda event: event.speech_started is not None),
+                    ops.map(lambda event: event.speech_started),
                 ),
                 name=f"{name}.signals",
             ),
             events=Stream(events, name=f"{name}.events"),
             turns=Stream(
                 events.pipe(
-                    ops.filter(lambda event: event.segment is not None),
-                    ops.map(lambda event: AudioTurn(event.context, event.segment)),
+                    ops.filter(lambda event: event.turn is not None),
+                    ops.map(lambda event: event.turn),
                 ),
                 name=f"{name}.turns",
             ),

@@ -4,8 +4,8 @@ import unittest
 import numpy as np
 from reactivex.subject import Subject
 
-from server.core.events import SpeechEvent
 from server.core.stream_dsl import Stream, SubGroup, turn_detector
+from server.core.turn_source import SpeechStarted
 
 
 class TurnDetectorTests(unittest.IsolatedAsyncioTestCase):
@@ -36,7 +36,8 @@ class TurnDetectorTests(unittest.IsolatedAsyncioTestCase):
         audio.on_next(np.array([1, 2, 3], dtype=np.int16))
         await asyncio.sleep(0.04)
 
-        self.assertEqual(signals, [SpeechEvent.SPEECH_START, SpeechEvent.SPEECH_END])
+        self.assertEqual(len(signals), 1)
+        self.assertIsInstance(signals[0], SpeechStarted)
         self.assertEqual(len(segments), 1)
         np.testing.assert_array_equal(
             segments[0],

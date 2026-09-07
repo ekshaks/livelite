@@ -1,14 +1,5 @@
 from dataclasses import dataclass
-from enum import Enum, auto
 from typing import Any
-
-
-class SpeechEvent(Enum):
-    SPEECH_START = auto()
-    SPEECH_END = auto()
-
-    def __str__(self):
-        return self.name
 
 
 @dataclass(frozen=True)

@@ -17,7 +17,7 @@ class ServerTLSConfigTests(unittest.TestCase):
             keyfile.write_text("key")
             certfile.write_text("cert")
 
-            with patch.dict(os.environ, {"XDG_CONFIG_HOME": tmp}, clear=False):
+            with patch.dict(os.environ, {"XDG_CONFIG_HOME": tmp}, clear=True):
                 config = ssl_config()
 
         self.assertEqual(config["ssl_keyfile"], str(keyfile))

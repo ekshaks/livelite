@@ -124,10 +124,7 @@ async def tts_kokoro_sequence_async(texts, speech_signals=None):
     interrupt_event = asyncio.Event()
 
     def on_signal(event):
-        if str(event) == "SPEECH_START":
-            interrupt_event.set()
-        if str(event) == "SPEECH_END":
-            interrupt_event.clear()
+        interrupt_event.set()
         print(f"INTERRUPT Signal received: {event}, interrupt: {interrupt_event}")
 
     if speech_signals:

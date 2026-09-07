@@ -9,15 +9,13 @@ import os
 import secrets
 import time
 from dataclasses import dataclass
-from dataclasses import replace
 from typing import Protocol
 
 from openai import AsyncOpenAI
-from .events import SpeechEvent
 from .voice_engine import run_voice_turn
 from .stt.pinned import PinnedWhisper
 from .token_signing import decode_json, encode_json, sign, signature_matches
-from .turn_source import PTTTurnSource, TurnContext, TurnSignal, TurnStreams, VADTurnSource, VoiceTurn
+from .turn_source import PTTTurnSource, SpeechStarted, VADTurnSource, VoiceInput, VoiceTurn
 from .turndet import _build_is_speech
 from .tts_providers.kokoro_fastapi import _kokoro_fastapi_base_url
 from .websocket_audio import WebSocketPCMOutput
@@ -38,7 +36,7 @@ class VoiceHandler(Protocol):
 
     async def wait_ready(self) -> None: ...
 
-    async def run(self, pcm16, context, is_current, emit, audio_output) -> None: ...
+    async def run(self, pcm16, turn, is_current, emit, audio_output) -> None: ...
 
     async def aclose(self) -> None: ...
 
@@ -100,8 +98,9 @@ class STT_LLM_TTS_Flow:
     async def wait_ready(self) -> None:
         await asyncio.wait_for(self.stt.wait_ready(), timeout=self.stt_load_timeout_seconds)
 
-    async def run(self, pcm16, context, is_current, emit, audio_output) -> None:
-        await run_voice_turn(pcm16, context=context, transcribe_turn=self.stt.transcribe_turn, stt_timeout_seconds=self.stt_timeout_seconds, llm_model=self.llm_model, is_current=is_current, emit=emit, audio_output=audio_output, response_id_factory=lambda: secrets.token_urlsafe(12), tts_client=getattr(self, "tts_client", None))
+    async def run(self, pcm16, turn, is_current, emit, audio_output) -> None:
+        transcribe_turn = getattr(self.stt, "transcribe_turn", None) or self.stt.transcribe
+        await run_voice_turn(pcm16, turn=turn, transcribe_turn=transcribe_turn, stt_timeout_seconds=self.stt_timeout_seconds, llm_model=self.llm_model, is_current=is_current, emit=emit, audio_output=audio_output, response_id_factory=lambda: secrets.token_urlsafe(12), tts_client=getattr(self, "tts_client", None))
 
     def close(self) -> None:
         self.stt.shutdown()
@@ -109,6 +108,10 @@ class STT_LLM_TTS_Flow:
     async def aclose(self) -> None:
         self.close()
         await self.tts_client.close()
+
+
+# Previous callers used this concise name for the default handler.
+VoicePipeline = STT_LLM_TTS_Flow
 
 
 class VoiceSession:
@@ -128,12 +131,12 @@ class VoiceSession:
         self.closed = asyncio.Event()
         self._ready_event = asyncio.Event()
         self.mode: str | None = None
-        self.streams: TurnStreams | None = None
+        self.voice_input: VoiceInput | None = None
         self.source = None
         self._events_task: asyncio.Task | None = None
         self._response_task: asyncio.Task | None = None
         self._generation = 0
-        self._response_context: TurnContext | None = None
+        self._response_turn: VoiceTurn | None = None
         self._response_turn_id: str | None = None
         self.sequence = 0
         self._bind_handler()
@@ -172,8 +175,8 @@ class VoiceSession:
             mode = event.get("mode", "ptt")
             if mode not in {"ptt", "vad"}:
                 raise ValueError("unknown voice mode")
-            self.ready, self.mode, self.streams = True, mode, TurnStreams()
-            self.source = PTTTurnSource(self.streams) if mode == "ptt" else VADTurnSource(self.streams, _voice_is_speech())
+            self.ready, self.mode, self.voice_input = True, mode, VoiceInput()
+            self.source = PTTTurnSource(self.voice_input) if mode == "ptt" else VADTurnSource(self.voice_input, _voice_is_speech())
             self._events_task = asyncio.create_task(self._consume_source_events(), name="voice-turn-events")
             self._ready_event.set()
             await self.emit({"type": "session.ready", "protocol": PROTOCOL, "mode": mode, "subject": self.principal.subject})
@@ -221,15 +224,13 @@ class VoiceSession:
             await result
 
     async def _consume_source_events(self) -> None:
-        assert self.streams is not None
+        assert self.voice_input is not None
         try:
-            while True:
-                event = await self.streams.events.get()
-                if isinstance(event, TurnSignal):
-                    if event.event == SpeechEvent.SPEECH_START:
-                        await self._cancel_pending_action()
-                        await self._cancel_response(emit_cancelled=True)
-                elif isinstance(event, VoiceTurn):
+            async for event in self.voice_input:
+                if isinstance(event, SpeechStarted):
+                    await self._cancel_pending_action()
+                    await self._cancel_response(emit_cancelled=True)
+                else:
                     await self._start_response(event)
         except asyncio.CancelledError:
             pass
@@ -238,11 +239,11 @@ class VoiceSession:
         await self._cancel_response(emit_cancelled=False)
         self._generation += 1
         generation = self._generation
-        context = replace(turn.context, generation=generation)
-        self._response_context = context
+        turn = turn.with_generation(generation)
+        self._response_turn = turn
         self._response_turn_id = turn.turn_id
         await self.emit({"type": "turn.committed", "turn_id": turn.turn_id})
-        self._response_task = asyncio.create_task(self._run(turn, context), name=f"voice:{turn.turn_id}")
+        self._response_task = asyncio.create_task(self._run(turn), name=f"voice:{turn.turn_id}")
 
     async def _start_tts_response(self, text: str) -> None:
         if self.pipeline is None or not hasattr(self.pipeline, "speak"):
@@ -250,84 +251,84 @@ class VoiceSession:
         await self._cancel_response(emit_cancelled=False)
         self._generation += 1
         turn_id = f"tts-{secrets.token_urlsafe(8)}"
-        context = TurnContext(turn_id=turn_id, generation=self._generation)
-        self._response_context = context
+        turn = VoiceTurn(id=turn_id, generation=self._generation)
+        self._response_turn = turn
         self._response_turn_id = turn_id
         await self.emit({"type": "turn.committed", "turn_id": turn_id})
         self._response_task = asyncio.create_task(
-            self._run_tts(text, context), name=f"voice:{turn_id}"
+            self._run_tts(text, turn), name=f"voice:{turn_id}"
         )
 
-    async def _run(self, turn: VoiceTurn, context: TurnContext) -> None:
+    async def _run(self, turn: VoiceTurn) -> None:
         try:
             if self.pipeline is None:
                 raise RuntimeError("voice handler is not configured")
-            await self.pipeline.run(turn.pcm16, context, lambda: self._response_context is context and not context.cancelled.is_set(), self.emit, self.audio_output)
+            await self.pipeline.run(turn.pcm16, turn, lambda: self._response_turn is turn and not turn.cancelled.is_set(), self.emit, self.audio_output)
         except asyncio.CancelledError:
             pass
         except Exception as exc:
-            if self._response_context is context:
+            if self._response_turn is turn:
                 logger.exception("voice pipeline failed turn_id=%s", turn.turn_id)
                 await self.emit({"type": "error", "turn_id": turn.turn_id, "text": f"pipeline failed: {type(exc).__name__}"})
                 await self.emit({"type": "turn.finished", "turn_id": turn.turn_id, "outcome": "failed", "reason": type(exc).__name__})
         finally:
-            if self._response_context is context:
+            if self._response_turn is turn:
                 self._response_task = None
                 self._response_turn_id = None
-                self._response_context = None
+                self._response_turn = None
 
-    async def _run_tts(self, text: str, context: TurnContext) -> None:
+    async def _run_tts(self, text: str, turn: VoiceTurn) -> None:
         try:
-            await self._speak(text, context)
-            if self._response_context is context:
-                await self.emit({"type": "turn.finished", "turn_id": context.turn_id, "outcome": "spoken"})
+            await self._speak(text, turn)
+            if self._response_turn is turn:
+                await self.emit({"type": "turn.finished", "turn_id": turn.id, "outcome": "spoken"})
         except asyncio.CancelledError:
             pass
         except Exception as exc:
-            if self._response_context is context:
-                logger.exception("voice TTS failed turn_id=%s", context.turn_id)
-                await self.emit({"type": "error", "turn_id": context.turn_id, "text": f"TTS failed: {type(exc).__name__}"})
-                await self.emit({"type": "turn.finished", "turn_id": context.turn_id, "outcome": "failed", "reason": type(exc).__name__})
+            if self._response_turn is turn:
+                logger.exception("voice TTS failed turn_id=%s", turn.id)
+                await self.emit({"type": "error", "turn_id": turn.id, "text": f"TTS failed: {type(exc).__name__}"})
+                await self.emit({"type": "turn.finished", "turn_id": turn.id, "outcome": "failed", "reason": type(exc).__name__})
         finally:
-            if self._response_context is context:
+            if self._response_turn is turn:
                 self._response_task = None
                 self._response_turn_id = None
-                self._response_context = None
+                self._response_turn = None
 
     async def speak(self, text: str) -> None:
         """Speak text in the active turn, for an embed transcript callback."""
-        context = self._response_context
-        if context is None:
+        turn = self._response_turn
+        if turn is None:
             raise RuntimeError("session.speak() requires an active voice turn")
-        await self._speak(text, context)
+        await self._speak(text, turn)
 
-    async def _speak(self, text: str, context: TurnContext) -> None:
+    async def _speak(self, text: str, turn: VoiceTurn) -> None:
         if self.pipeline is None or not hasattr(self.pipeline, "speak"):
             raise RuntimeError("TTS is unavailable for this voice session")
-        if context.cancelled.is_set() or self._response_context is not context:
+        if turn.cancelled.is_set() or self._response_turn is not turn:
             return
         response_id = secrets.token_urlsafe(12)
         self._active_response_id = response_id
         self.audio_output.begin_response()
-        await self.emit({"type": "response.started", "turn_id": context.turn_id, "response_id": response_id})
-        await self.emit({"type": "response.text", "turn_id": context.turn_id, "response_id": response_id, "text": text})
-        await self.pipeline.speak(text, context.cancelled, self.audio_output)
-        if context.cancelled.is_set() or self._response_context is not context:
+        await self.emit({"type": "response.started", "turn_id": turn.id, "response_id": response_id})
+        await self.emit({"type": "response.text", "turn_id": turn.id, "response_id": response_id, "text": text})
+        await self.pipeline.speak(text, turn.cancelled, self.audio_output)
+        if turn.cancelled.is_set() or self._response_turn is not turn:
             return
         await self.audio_output.wait_until_drained()
-        if self._response_context is context:
-            await self.emit({"type": "response.finished", "turn_id": context.turn_id, "response_id": response_id})
+        if self._response_turn is turn:
+            await self.emit({"type": "response.finished", "turn_id": turn.id, "response_id": response_id})
         if self._active_response_id == response_id:
             self._active_response_id = None
 
     async def _announce_audio_format(self, sample_rate: int) -> None:
         """Send format metadata before the first PCM frame of a response."""
-        if self._active_response_id is None or self._response_context is None:
+        if self._active_response_id is None or self._response_turn is None:
             return
         await self.emit(
             {
                 "type": "response.audio",
-                "turn_id": self._response_context.turn_id,
+                "turn_id": self._response_turn.id,
                 "response_id": self._active_response_id,
                 "sample_rate": sample_rate,
                 "channels": 1,
@@ -340,9 +341,9 @@ class VoiceSession:
         if task is None:
             return
         self._generation += 1
-        if self._response_context is not None:
-            self._response_context.cancelled.set()
-            self._response_context = None
+        if self._response_turn is not None:
+            self._response_turn.cancelled.set()
+            self._response_turn = None
         task.cancel()
         self.audio_output.clear()
         self._active_response_id = None

@@ -10,8 +10,7 @@ import time
 from dataclasses import dataclass
 from typing import Any, Callable, Optional, Tuple
 
-from .events import SpeechEvent
-from .turn_source import TurnContext
+from .turn_source import SpeechStarted, VoiceTurn
 
 # Singleton instances
 _VAD_MODEL = None
@@ -247,8 +246,8 @@ def get_vad_model() -> Tuple[Any, Any]:
 @dataclass(frozen=True)
 class VadEmission:
     segment: Optional[np.ndarray] = None
-    signal: Optional[SpeechEvent] = None
-    context: Optional[TurnContext] = None
+    speech_started: Optional[SpeechStarted] = None
+    turn: Optional[VoiceTurn] = None
 
 
 def _build_is_speech(
@@ -309,7 +308,7 @@ def turn_detector_vad(
             ) from None
 
         buffer = []
-        context = [None]
+        turn = [None]
         last_speech_time = [0.0]
         disposed = [False]
 
@@ -318,9 +317,9 @@ def turn_detector_vad(
                 return
             if is_speech(chunk):
                 if not buffer:
-                    context[0] = TurnContext(uuid.uuid4().hex)
+                    turn[0] = VoiceTurn(uuid.uuid4().hex)
                     print("[interrupt] VAD SPEECH_START")
-                    observer.on_next(VadEmission(signal=SpeechEvent.SPEECH_START, context=context[0]))
+                    observer.on_next(VadEmission(speech_started=SpeechStarted(turn[0])))
                 buffer.append(chunk)
                 last_speech_time[0] = time.monotonic()
 
@@ -329,12 +328,11 @@ def turn_detector_vad(
                 return
             if not force and (time.monotonic() - last_speech_time[0]) < silence_timeout:
                 return
-            print("[interrupt] VAD SPEECH_END")
-            observer.on_next(VadEmission(signal=SpeechEvent.SPEECH_END, context=context[0]))
             segment = np.concatenate(buffer, axis=0)
             buffer.clear()
-            observer.on_next(VadEmission(segment=segment, context=context[0]))
-            context[0] = None
+            completed_turn = turn[0].with_pcm16(segment.tobytes())
+            observer.on_next(VadEmission(segment=segment, turn=completed_turn))
+            turn[0] = None
 
         def on_completed():
             emit_segment_if_ready(force=True)
