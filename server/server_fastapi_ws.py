@@ -1,5 +1,3 @@
-import asyncio
-import json
 import logging
 
 from fastapi import FastAPI, WebSocket
@@ -8,7 +6,8 @@ from fastapi.staticfiles import StaticFiles
 import pathlib
 from fastapi.websockets import WebSocketDisconnect
 
-from server.core.ws_voice_protocols import STT_LLM_TTS_Flow, VoiceHandler, VoicePrincipal, VoiceSession
+from server.core.ws_voice_protocols import STT_LLM_TTS_Flow, VoiceHandler
+from server.fastapi_voice_ws_transport import local_principal, mount_voice_transport
 
 logger = logging.getLogger("uvicorn.error")
 _pipeline: STT_LLM_TTS_Flow | None = None  # compatibility hook for embedders/tests
@@ -42,17 +41,23 @@ def create_app(
         return pipeline
 
     async def default_run_session(session):
-        created = session.pipeline is None
-        handler = session.pipeline or voice_handler or STT_LLM_TTS_Flow(
-            config=config,
-        )
+        handler = session.pipeline or voice_pipeline()
         if session.pipeline is None:
             session.set_handler(handler)
-        try:
-            await session.wait_until_ready()
-        finally:
-            if created and hasattr(handler, "aclose"):
-                await handler.aclose()
+        await session.closed.wait()
+
+    async def prepare_default_runner():
+        selected = voice_pipeline()
+        if hasattr(selected, "wait_ready"):
+            await selected.wait_ready()
+
+    async def close_default_runner():
+        selected = pipeline
+        if selected is not None and hasattr(selected, "aclose"):
+            await selected.aclose()
+
+    default_run_session.prepare = prepare_default_runner
+    default_run_session.close = close_default_runner
 
     @app.get("/", response_class=FileResponse)
     async def index():
@@ -71,74 +76,12 @@ def create_app(
             logger.exception("echo WebSocket error")
             await ws.close()
 
-    @app.on_event("startup")
-    async def warm_voice_pipeline() -> None:
-        if run_session is not None:
-            prepare = getattr(run_session, "prepare", None)
-            if prepare is not None:
-                await prepare()
-                logger.info("voice session runner prepared")
-            return
-        selected = voice_pipeline()
-        if not hasattr(selected, "wait_ready"):
-            return
-        if hasattr(selected, "stt"):
-            logger.info("voice pipeline warming stt_loading=%s", selected.stt.is_loading())
-        await selected.wait_ready()
-        logger.info("voice pipeline ready")
-
-    @app.on_event("shutdown")
-    async def close_voice_pipeline() -> None:
-        if run_session is not None:
-            close = getattr(run_session, "close", None)
-            if close is not None:
-                await close()
-            return
-        if run_session is None and pipeline is not None and hasattr(pipeline, "aclose"):
-            await pipeline.aclose()
-
-    @app.websocket("/voice")
-    async def voice_endpoint(ws: WebSocket):
-        # ISC R1/I_AUTH: this server is bound to 127.0.0.1; remote use needs authentication.
-        await ws.accept()
-        logger.info("voice socket accepted client=%s", ws.client)
-        session = VoiceSession(
-            VoicePrincipal("local", "Local"),
-            None if run_session is not None else voice_pipeline(),
-            ws.send_json,
-            ws.send_bytes,
-        )
-        session_runner = asyncio.create_task(
-            (run_session or default_run_session)(session),
-            name="voice-session-runner",
-        )
-        try:
-            while True:
-                message = await ws.receive()
-                if message["type"] == "websocket.disconnect":
-                    logger.info("voice socket disconnected client=%s", ws.client)
-                    break
-                if message.get("text") is not None:
-                    event = json.loads(message["text"])
-                    log = logger.debug if event.get("type") == "turn.start" else logger.info
-                    log("voice event received type=%s turn_id=%s", event.get("type"), event.get("turn_id"))
-                    await session.handle_json(event)
-                elif message.get("bytes") is not None:
-                    logger.debug("voice PCM received bytes=%d turn_id=%s", len(message["bytes"]), session.turn_id)
-                    await session.handle_pcm16(message["bytes"])
-        except (ValueError, KeyError, json.JSONDecodeError) as exc:
-            logger.warning("voice protocol error: %s", exc)
-            await ws.send_json({"type": "error", "text": "invalid voice protocol event"})
-        except WebSocketDisconnect:
-            logger.info("voice socket disconnected client=%s", ws.client)
-        except Exception:
-            logger.exception("voice socket failed")
-            raise
-        finally:
-            logger.info("voice session cleanup turn_id=%s", session.turn_id)
-            await session.cancel()
-            session_runner.cancel()
-            await asyncio.gather(session_runner, return_exceptions=True)
+    mount_voice_transport(
+        app,
+        path="/voice",
+        run_session=run_session or default_run_session,
+        principal_resolver=local_principal,
+    )
 
     # Test and embedding hooks, matching the aio WebRTC server's injected runner.
     app.state.get_voice_pipeline = voice_pipeline

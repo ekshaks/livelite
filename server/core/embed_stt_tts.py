@@ -1,0 +1,173 @@
+"""Independent STT and TTS flows for embedding Mulive in a host app."""
+
+from __future__ import annotations
+
+import asyncio
+import inspect
+import os
+from typing import Any, Awaitable, Callable, TYPE_CHECKING
+
+import numpy as np
+
+from .stt.deepgram import DeepgramSTT
+from .stt.pinned import PinnedWhisper
+from .tts_providers.factory import TTSConfig, create_tts_provider
+from .turndet import warm_up_vad
+
+if TYPE_CHECKING:
+    from .audio_output import AudioOutput
+    from .turn_source import TurnContext
+    from .ws_voice_protocols import VoiceSession
+
+
+TranscriptCallback = Callable[[str, "VoiceSession"], Awaitable[None] | None]
+
+
+class STTFlow:
+    """Configuration-backed completed-turn transcription."""
+
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
+        self.config = dict(config or {})
+        self.provider_name = str(self.config.get("provider") or "faster_whisper")
+        self.timeout_seconds = float(self.config.get("timeout_seconds") or 30)
+        if self.timeout_seconds <= 0:
+            raise ValueError("stt.timeout_seconds must be positive")
+
+        if self.provider_name in {"mlx", "faster_whisper"}:
+            kwargs = dict(self.config.get("kwargs") or {})
+            self.provider: PinnedWhisper | DeepgramSTT = PinnedWhisper(
+                mode=self.provider_name,
+                model_size=str(self.config.get("model") or self.config.get("model_size") or "tiny"),
+                language=str(self.config.get("language") or "en"),
+                **kwargs,
+            )
+        elif self.provider_name == "deepgram":
+            self.provider = DeepgramSTT(
+                model=str(self.config.get("model") or "nova-2"),
+                language=str(self.config.get("language") or "en"),
+                smart_format=bool(self.config.get("smart_format", True)),
+                timeout_s=self.timeout_seconds,
+            )
+        else:
+            raise ValueError(f"Unknown STT provider: {self.provider_name}")
+
+    async def wait_ready(self) -> None:
+        if isinstance(self.provider, PinnedWhisper):
+            await self.provider.wait_ready()
+
+    async def transcribe_turn(self, pcm16: bytes) -> str:
+        samples = np.frombuffer(pcm16, dtype=np.int16)
+        if isinstance(self.provider, PinnedWhisper):
+            operation = self.provider.transcribe_turn(samples)
+        else:
+            operation = asyncio.to_thread(self.provider.transcribe_turn, samples)
+        return await asyncio.wait_for(operation, timeout=self.timeout_seconds)
+
+    async def aclose(self) -> None:
+        if isinstance(self.provider, PinnedWhisper):
+            self.provider.shutdown()
+
+
+class TTSFlow:
+    """Configuration-backed server synthesis for one session audio output."""
+
+    def __init__(self, config: dict[str, Any] | None = None) -> None:
+        self.config = dict(config or {})
+        self.enabled = bool(self.config.get("enabled", True))
+
+    def create_speaker(self, audio_output: "AudioOutput"):
+        if not self.enabled:
+            raise RuntimeError("TTS is disabled by configuration")
+        provider = str(self.config.get("provider") or "kokoro_fastapi")
+        provider = {"kokoro": "kokoro_fastapi"}.get(provider, provider)
+        if provider == "gemini":
+            raise ValueError("Gemini TTS does not yet support embedded PCM output")
+        return create_tts_provider(
+            TTSConfig(
+                provider=provider,
+                output="webrtc",
+                voice=self.config.get("voice"),
+                model=self.config.get("model"),
+            ),
+            audio_output=audio_output,
+        )
+
+
+class EmbedVoiceHandler:
+    """Per-session composition of independent STT and TTS flows."""
+
+    def __init__(self, stt_flow: STTFlow, tts_flow: TTSFlow, on_transcript: TranscriptCallback | None) -> None:
+        self.stt_flow = stt_flow
+        self.tts_flow = tts_flow
+        self.on_transcript = on_transcript
+        self.session: VoiceSession | None = None
+        self._speaker = None
+
+    def bind_session(self, session: "VoiceSession") -> None:
+        self.session = session
+        if self.tts_flow.enabled:
+            self._speaker = self.tts_flow.create_speaker(session.audio_output)
+
+    async def wait_ready(self) -> None:
+        await self.stt_flow.wait_ready()
+
+    async def run(self, pcm16, context: "TurnContext", is_current, emit, _audio_output) -> None:
+        text = await self.stt_flow.transcribe_turn(pcm16)
+        if not is_current():
+            return
+        await emit({"type": "transcript.final", "turn_id": context.turn_id, "text": text})
+        if self.on_transcript is not None:
+            if self.session is None:
+                raise RuntimeError("embed voice handler is not bound to a session")
+            result = self.on_transcript(text, self.session)
+            if inspect.isawaitable(result):
+                await result
+        if is_current():
+            await emit({"type": "turn.finished", "turn_id": context.turn_id, "outcome": "transcribed"})
+
+    async def speak(self, text: str, cancelled: asyncio.Event, _audio_output) -> None:
+        if self._speaker is None:
+            raise RuntimeError("embed voice handler is not bound to a session")
+        await self._speaker.speak(text, cancelled)
+
+    async def aclose(self) -> None:
+        if self._speaker is not None:
+            close = getattr(self._speaker, "aclose", None)
+            if close is not None:
+                await close()
+
+
+class EmbedRuntime:
+    """Shared provider lifecycle and per-WebSocket handler creation."""
+
+    def __init__(self, config: dict[str, Any] | None = None, on_transcript: TranscriptCallback | None = None) -> None:
+        config = config or {}
+        vad_config = dict(config.get("vad") or {})
+        self.vad_backend = str(vad_config.get("backend") or "").strip().lower()
+        if self.vad_backend and self.vad_backend not in {"torch", "onnx"}:
+            raise ValueError("vad.backend must be 'torch' or 'onnx'")
+        self.stt_flow = STTFlow(config.get("stt"))
+        self.tts_flow = TTSFlow(config.get("tts"))
+        self.on_transcript = on_transcript
+
+    async def wait_ready(self) -> None:
+        if self.vad_backend:
+            os.environ.setdefault("SILERO_BACKEND", self.vad_backend)
+        await asyncio.gather(self.stt_flow.wait_ready(), asyncio.to_thread(warm_up_vad))
+
+    def create_handler(self) -> EmbedVoiceHandler:
+        return EmbedVoiceHandler(self.stt_flow, self.tts_flow, self.on_transcript)
+
+    def create_session_runner(self):
+        async def run_session(session):
+            handler = self.create_handler()
+            session.set_handler(handler)
+            try:
+                await session.closed.wait()
+            finally:
+                await handler.aclose()
+
+        return run_session
+
+    async def aclose(self) -> None:
+        await self.stt_flow.aclose()
